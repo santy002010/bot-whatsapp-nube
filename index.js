@@ -32,22 +32,17 @@ const client = new Client({
     }
 });
 
-// --- 3. EVENTO DE VINCULACIÓN POR CÓDIGO DE 8 DÍGITOS ---
+// --- NUEVA LÓGICA: Solo pedir código si REALMENTE no hay sesión ---
 client.on('qr', async (qr) => {
-    // CAMBIA ESTO: Tu número de teléfono con código de país (Ej: 5491123456789)
-    // Sin espacios, sin el signo + y sin guiones.
-    const numeroTelefono = '5491128394646'; 
-
-    console.log(`\n[AUTH] 📲 Generando código de vinculación para el número: ${numeroTelefono}...`);
+    // Si ya tienes sesión, el bot no debería entrar aquí. 
+    // Si entra, es que la sesión se perdió.
+    const numeroTelefono = '5491128394646'; // Pon tu número aquí
     try {
         const pairingCode = await client.requestPairingCode(numeroTelefono);
-        console.log('\n==================================================');
-        console.log(`🔑 TU CÓDIGO DE VINCULACIÓN ES: ${pairingCode}`);
-        console.log('==================================================\n');
+        console.log(`\n🔑 CÓDIGO DE VINCULACIÓN: ${pairingCode}\n`);
     } catch (err) {
-        console.error('[ERROR] No se pudo generar el código de 8 dígitos:', err);
+        console.error('Error al generar código:', err);
     }
-});
 
 client.on('ready', () => {
     console.log('\n==================================================');
