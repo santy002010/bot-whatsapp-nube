@@ -98,28 +98,38 @@ async function startBot() {
     });
 
     if (!sock.authState.creds.registered) {
+        console.log('\n[SISTEMA] Solicitando códigos de vinculación. Se generará un recordatorio cada 5 minutos...\n');
+        let intentos = 0;
+        
+        // El primero sale rápido a los 3 segundos para que lo tengas apenas arranca
         setTimeout(async () => {
             try {
-                // 🔥 NUEVO NÚMERO DEL BOT ACÁ
                 const code = await sock.requestPairingCode('5491178972853');
                 console.log('\n==================================================');
-                console.log(`🔑 TU NUEVO CÓDIGO DE VINCULACIÓN ES: ${code}`);
+                console.log(`🔑 TU CÓDIGO INICIAL ES: ${code} `);
                 console.log('==================================================\n');
-            } catch (error) { console.error('[ERROR]', error.message); }
+            } catch (e) { }
         }, 3000);
+
+        // Cada 5 minutos (300000 ms) te tira un código nuevo por si el anterior venció
+        const intervalId = setInterval(async () => {
+            intentos++;
+            try {
+                // Si ya se vinculó o pasaron 12 intentos (1 hora), frena el ciclo
+                if (sock.authState.creds.registered || intentos > 12) {
+                    clearInterval(intervalId);
+                    return;
+                }
+                const code = await sock.requestPairingCode('5491178972853');
+                console.log('\n==================================================');
+                console.log(`🔄 CÓDIGO DE REEMPLAZO (5 MIN): ${code}`);
+                console.log('==================================================\n');
+            } catch (error) { 
+                console.error('[ERROR] Esperando actualización...', error.message); 
+            }
+        }, 300000); // 300000 ms = 5 minutos exactos
     }
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            startBot(); 
-        } else if (connection === 'open') {
-            console.log('\n🚀 [SISTEMA] ¡BOT ONLINE EN TU GRUPO! 🚀\n');
-        }
-    });
-
+    
     // --- 6. COMANDOS ---
     sock.ev.on('messages.upsert', async (m) => {
         if (m.type !== 'notify') return;
