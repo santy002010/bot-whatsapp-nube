@@ -129,6 +129,19 @@ async function startBot() {
             }
         }, 300000); // 300000 ms = 5 minutos exactos
     }
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            console.log('\n[ALERTA] Conexión cerrada por WhatsApp. Esperando 10 segundos antes de reconectar para evitar bloqueos...\n');
+            // Le damos 10 segundos de respiro antes de volver a intentar conectar
+            setTimeout(() => {
+                startBot(); 
+            }, 10000);
+        } else if (connection === 'open') {
+            console.log('\n🚀 [SISTEMA] ¡BOT ONLINE EN TU GRUPO! 🚀\n');
+        }
+    });
+
     
     // --- 6. COMANDOS ---
     sock.ev.on('messages.upsert', async (m) => {
