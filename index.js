@@ -11,6 +11,9 @@ app.listen(PORT, () => console.log(`[SERVER] Monitor activo en puerto ${PORT}`))
 
 // --- 2. CONFIGURACIÓN ---
 const GRUPO_PERMITIDO = '120363426591951143@g.us'; 
+// 🔥 LISTA VIP DE ADMINS (Acá están tu número original y el nuevo del bot)
+const ADMINS = ['5491128394646', '5491178972853'];
+
 let botActivo = true;       
 let nsfwPermitido = false;  
 
@@ -31,9 +34,8 @@ function guardarBaneos() {
     } catch(e) {}
 }
 
-// --- 4. MOTORES DE BÚSQUEDA (CORREGIDOS) ---
+// --- 4. MOTORES DE BÚSQUEDA ---
 
-// Reddit 
 async function searchReddit(query, allowNsfw) {
     try {
         const res = await fetch(`https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance`);
@@ -48,27 +50,22 @@ async function searchReddit(query, allowNsfw) {
     } catch (e) { return null; }
 }
 
-// Pinterest (Truco: Busca en Bing de fondo para evitar bloqueos)
 async function searchPinterest(query) {
     try {
         const res = await fetch(`https://www.bing.com/images/search?q=${encodeURIComponent(query)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
         const html = await res.text();
-        // Extrae enlaces a imágenes jpg o png gigantes
         const regex = /(https:\/\/[^"'\s&<>]+\.(?:jpg|jpeg|png))/gi;
         const matches = [...html.matchAll(regex)];
         
-        // Filtramos para evitar que devuelva miniaturas chiquitas
         const validImages = matches.map(m => m[1]).filter(url => !url.includes('th.bing.com') && !url.includes('profile_images'));
         return validImages.length > 0 ? validImages[0] : (matches.length > 0 ? matches[0][1] : null);
     } catch (e) { return null; }
 }
 
-// Google (Inteligente: Limpia la pregunta antes de buscar)
 async function searchGoogle(query) {
     try {
-        // Le saca el "que es" o "quien es" para que no falle la búsqueda
         let cleanQuery = query.replace(/^(qué es|que es|quién es|quien es|qué significa|que significa)\s+(un|una|el|la|los|las)?\s*/i, '').trim();
         if (!cleanQuery) cleanQuery = query;
 
@@ -103,9 +100,10 @@ async function startBot() {
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
-                const code = await sock.requestPairingCode('5491128394646');
+                // 🔥 NUEVO NÚMERO DEL BOT ACÁ
+                const code = await sock.requestPairingCode('5491178972853');
                 console.log('\n==================================================');
-                console.log(`🔑 TU CÓDIGO DE VINCULACIÓN ES: ${code}`);
+                console.log(`🔑 TU NUEVO CÓDIGO DE VINCULACIÓN ES: ${code}`);
                 console.log('==================================================\n');
             } catch (error) { console.error('[ERROR]', error.message); }
         }, 3000);
@@ -116,7 +114,7 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            startBot(); // Solo se reconecta internamente
+            startBot(); 
         } else if (connection === 'open') {
             console.log('\n🚀 [SISTEMA] ¡BOT ONLINE EN TU GRUPO! 🚀\n');
         }
@@ -131,9 +129,12 @@ async function startBot() {
         const chatId = msg.key.remoteJid;
         if (chatId !== GRUPO_PERMITIDO) return; 
 
-        const miNumeroLimpio = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : '5491128394646@s.whatsapp.net';
+        // Identificación de remitente y validación de Admins
+        const miNumeroLimpio = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : '5491178972853@s.whatsapp.net';
         const sender = msg.key.participant || (msg.key.fromMe ? miNumeroLimpio : msg.key.remoteJid); 
-        const esAdmin = msg.key.fromMe || sender.includes('1128394646') || sender === miNumeroLimpio; 
+        
+        // 🔥 VERIFICA SI ES ADMIN REVISANDO LA LISTA
+        const esAdmin = msg.key.fromMe || ADMINS.some(adminNum => sender.includes(adminNum));
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption;
         if (!text || !text.startsWith('/')) return;
@@ -160,7 +161,6 @@ async function startBot() {
                 
                 case 'restart':
                 case 'restard':
-                    // 🔥 ACÁ ESTÁ EL ARREGLO: Ya no mata el servidor para evitar que se desvincule
                     return await sock.sendMessage(chatId, { text: '✅ *Sistema estable.* UptimeRobot está manteniendo el bot despierto. ¡No hace falta reiniciar!' });
                 
                 case '+18on':
@@ -173,9 +173,12 @@ async function startBot() {
 
                 case 'ban':
                     if (!usuarioCitado) return await sock.sendMessage(chatId, { text: '⚠️ Respondé al mensaje de la persona que quieras banear del bot.' });
-                    if (usuarioCitado.includes('1128394646') || usuarioCitado === miNumeroLimpio) {
-                        return await sock.sendMessage(chatId, { text: '❌ No podés banearte a vos mismo.' });
+                    
+                    // Verifica si estás intentando banear a uno de los admins de la lista
+                    if (ADMINS.some(adminNum => usuarioCitado.includes(adminNum)) || usuarioCitado === miNumeroLimpio) {
+                        return await sock.sendMessage(chatId, { text: '❌ No podés banear a un Administrador ni al Bot.' });
                     }
+                    
                     if (!baneados.includes(usuarioCitado)) {
                         baneados.push(usuarioCitado);
                         guardarBaneos();
