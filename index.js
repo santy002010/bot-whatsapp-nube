@@ -1,118 +1,128 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const fs = require('fs');
-const express = require('express'); // <-- NUEVO: Necesario para la nube
+const express = require('express');
 
-// --- MINI SERVIDOR WEB PARA QUE RENDER NO LO APAGUE ---
+// --- 1. CONFIGURACIÓN DEL SERVIDOR WEB (MONITOR DE RENDER) ---
 const app = express();
-app.get('/', (req, res) => res.send('🤖 El bot está despierto y funcionando en la nube.'));
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🌐 Servidor web escuchando en el puerto ${PORT}`));
+const PORT = process.env.PORT || 10000;
+const START_TIME = Date.now(); // Guarda la hora exacta de encendido
 
-// --- AJUSTE DE IDENTIDADES ---
-const ID_DEL_CHAT = '120363426591951143@g.us'; 
-const NUMERO_TELEFONO_BOT = 'TU_NUMERO_BOT_AQUI'; 
+app.get('/', (req, res) => {
+    const uptimeMinutes = ((Date.now() - START_TIME) / 1000 / 60).toFixed(2);
+    res.json({
+        status: "online",
+        project: "WhatsApp Bot Pro",
+        uptime_minutes: parseFloat(uptimeMinutes),
+        environment: "Render Cloud"
+    });
+});
 
-let botActivo = true;
-let nsfwActivado = false; 
-let listaNegra = [];
+app.listen(PORT, () => {
+    console.log(`[SERVER] 🌐 Monitor Express activo en el puerto ${PORT}`);
+});
 
-if (fs.existsSync('./listaNegra.json')) {
-    try { listaNegra = JSON.parse(fs.readFileSync('./listaNegra.json', 'utf-8')); } catch (e) { listaNegra = []; }
-}
-
-function guardarListaNegra() {
-    fs.writeFileSync('./listaNegra.json', JSON.stringify(listaNegra, null, 2));
-}
-
-// --- CONFIGURACIÓN CLIENTE PARA LA NUBE ---
+// --- 2. CONFIGURACIÓN OPTIMIZADA DEL CLIENTE (ANTI-ERRORES) ---
+console.log('[BOT] Inicializando motor de WhatsApp...');
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'mi-bot-whatsapp' }),
+    authStrategy: new LocalAuth(),
     puppeteer: {
-        // Quitamos la ruta de Termux. Render descargará su propio Chromium automáticamente.
+        headless: true,
         args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--no-zygote',
+            '--single-process' // Truco Pro: Reduce drásticamente el consumo de RAM en Render
         ]
     }
 });
 
-// --- EVENTOS DE ARRANQUE ---
-client.on('qr', async qr => {
-    if (NUMERO_TELEFONO_BOT !== 'TU_NUMERO_BOT_AQUI') {
-        try {
-            console.log('\n⏳ Solicitando código de emparejamiento a WhatsApp...');
-            const code = await client.requestPairingCode(NUMERO_TELEFONO_BOT);
-            console.log('\n=======================================');
-            console.log('📱 CÓDIGO DE EMPAREJAMIENTO: ' + code);
-            console.log('=======================================\n');
-        } catch (e) {
-            console.log('❌ Error pidiendo el código, mostrando QR de emergencia:');
-            qrcode.generate(qr, { small: true });
-        }
-    } else {
-        qrcode.generate(qr, { small: true });
-    }
+// --- 3. GESTIÓN DE EVENTOS DE CONEXIÓN ---
+
+// Evento: Generar QR
+client.on('qr', (qr) => {
+    console.log('\n[AUTH] 📌 Nuevo código QR generado. Escanéalo desde tu WhatsApp:');
+    qrcode.generate(qr, { small: true });
 });
 
+// Evento: Conectado con éxito
 client.on('ready', () => {
-    console.log('\n=======================================');
-    console.log('🚀 BOT LISTO Y FUNCIONANDO EN LA NUBE');
-    console.log('=======================================\n');
+    console.log('\n==================================================');
+    console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está listo para usar. 🎉');
+    console.log('==================================================\n');
 });
 
-// --- LÓGICA PRINCIPAL ---
-client.on('message_create', async msg => {
-    const remitente = msg.author || msg.from;
-    
-    if (msg.from !== ID_DEL_CHAT && msg.to !== ID_DEL_CHAT && msg.id.remote !== ID_DEL_CHAT) return;
-    
-    const esAdmin = msg.fromMe || (remitente && remitente.includes('1128394646'));
-    if (listaNegra.includes(remitente) && !esAdmin) return;
+// Evento: Desconexión Crítica
+client.on('disconnected', (reason) => {
+    console.log(`[ALERTA] ❌ Bot desconectado del teléfono. Razón: ${reason}`);
+    console.log('[SISTEMA] Reiniciando entorno para intentar re-vinculación...');
+    process.exit(1); // Render lo encenderá de nuevo limpio automáticamente
+});
 
-    const cuerpo = msg.body || '';
-    const partes = cuerpo.split(/\s+/);
-    const comando = partes[0].toLowerCase();
-    const busqueda = partes.slice(1).join(' ');
+// --- 4. SISTEMA CENTRAL DE COMANDOS (Estructura Limpia) ---
+client.on('message', async (msg) => {
+    const messageBody = msg.body.trim();
 
-    if (esAdmin) {
-        if (comando === '/off') { botActivo = false; return msg.reply('💤 Bot apagado.'); }
-        if (comando === '/on') { botActivo = true; return msg.reply('✅ Bot encendido.'); }
-        if (comando === '/+18on') { nsfwActivado = true; return msg.reply('🔥 Modo +18 Activado.'); }
-        if (comando === '/+18off') { nsfwActivado = false; return msg.reply('🔞 Modo +18 Desactivado.'); }
-        if (comando === '/ban' && msg.hasQuotedMsg) {
-            const q = await msg.getQuotedMessage();
-            const target = q.author || q.from;
-            if (!listaNegra.includes(target)) {
-                listaNegra.push(target);
-                guardarListaNegra();
-                return msg.reply('🚫 Usuario bloqueado.');
-            }
-        }
-        if (comando === '/unban' && busqueda) {
-            const target = busqueda.includes('@') ? busqueda : busqueda.replace(/[^0-9]/g, '') + '@c.us';
-            listaNegra = listaNegra.filter(id => id !== target);
-            guardarListaNegra();
-            return msg.reply('✅ Usuario desbloqueado.');
-        }
-    }
+    // Filtro: Solo responde si el mensaje empieza con tu prefijo (ej: !)
+    if (!messageBody.startsWith('!')) return;
 
-    if (!botActivo || !cuerpo.startsWith('/')) return;
+    // Separa el comando de los argumentos
+    const args = messageBody.slice(1).split(/ +/);
+    const command = args.shift().toLowerCase();
 
-    if (!nsfwActivado) {
-        const check = (cuerpo + busqueda).toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (['rule34','r34','porno','xxx','hentai','nude','gore','tetas','cuca'].some(p => check.includes(p))) {
-            return msg.reply('👮‍♂️ Comando denegado.');
-        }
-    }
+    console.log(`[LOG] Comando ejecutado: !${command} | Por: ${msg.from}`);
 
-    if (comando === '/google') {
-        if (!busqueda) return msg.reply('⚠️ Ejemplo: /google nodejs');
-        msg.reply(`🌐 Resultados en Google:\nhttps://www.google.com/search?q=${encodeURIComponent(busqueda)}`);
+    switch (command) {
+        
+        case 'hola':
+            await msg.reply('🤖 *¡Modo Pro Activo!* Hola, estoy corriendo de forma estable en la nube 24/7. ¿En qué puedo ayudarte hoy? 🔥');
+            break;
+
+        case 'status':
+        case 'ping':
+            const uptime = ((Date.now() - START_TIME) / 1000 / 60).toFixed(1);
+            const memory = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
+            
+            const dashboard = 
+                `📊 *ESTADO DEL SISTEMA PRO*\n\n` +
+                `🟢 *Estado:* Operativo\n` +
+                `⏱️ *Uptime:* ${uptime} minutos activos\n` +
+                `💾 *RAM en uso:* ${memory} MB / 512 MB\n` +
+                `☁️ *Servidor:* Render Cloud`;
+            await msg.reply(dashboard);
+            break;
+
+        case 'reiniciar':
+            await msg.reply('🔄 *Entendido.* Forzando reinicio del servidor en la nube... Dame unos 30 segundos.');
+            console.log('[SISTEMA] Reinicio solicitado por el usuario. Apagando proceso...');
+            setTimeout(() => {
+                process.exit(0); // Render detecta el apagado y lo enciende al instante
+            }, 1500);
+            break;
+
+        // 💡 AQUÍ PUEDES SEGUIR AGREGANDO MÁS COMANDOS FÁCILMENTE:
+        // case 'ayuda':
+        //     await msg.reply('Lista de comandos...');
+        //     break;
+
+        default:
+            // Si escriben un comando que no existe, el bot no hace nada (evita spam)
+            break;
     }
 });
 
+// --- 5. SALVAVIDAS GLOBAL (Evita que el bot muera por errores imprevistos) ---
+process.on('unhandledRejection', (reason, p) => {
+    console.error('[ERROR] Rechazo no manejado en promesa:', p, 'Razón:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('[ERROR CRÍTICO] Excepción no controlada:', err);
+    console.log('[SISTEMA] Ejecutando reinicio de emergencia preventivo...');
+    process.exit(1);
+});
+
+// Encender el bot
 client.initialize();
-  
+    
