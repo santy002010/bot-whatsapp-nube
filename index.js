@@ -1,5 +1,6 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const pino = require('pino');
 
 // --- 1. CONFIGURACIÓN DEL SERVIDOR WEB ---
 const app = express();
@@ -15,71 +16,102 @@ app.listen(PORT, () => {
     console.log(`[SERVER] 🌐 Monitor Express activo en el puerto ${PORT}`);
 });
 
-// --- 2. CONFIGURACIÓN OPTIMIZADA DEL CLIENTE ---
-console.log('[BOT] Inicializando motor de WhatsApp...');
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-zygote',
-            '--single-process'
-        ]
-    }
-});
+// --- 2. CONFIGURACIÓN DE BAILEYS ---
+console.log('[BOT] Inicializando motor de WhatsApp con Baileys...');
 
-// --- NUEVA LÓGICA: Solo pedir código si REALMENTE no hay sesión ---
-client.on('qr', async (qr) => {
-    // Si ya tienes sesión, el bot no debería entrar aquí. 
-    // Si entra, es que la sesión se perdió.
-    const numeroTelefono = '5491128394646'; // Pon tu número aquí
+const logger = pino({ level: 'error' });
+let sock;
+let connectionAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+async function connectToWhatsApp() {
     try {
-        const pairingCode = await client.requestPairingCode(numeroTelefono);
-        console.log(`\n🔑 CÓDIGO DE VINCULACIÓN: ${pairingCode}\n`);
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+        
+        sock = makeWASocket({
+            auth: state,
+            logger: logger,
+            printQRInTerminal: true,
+            browser: ['Ubuntu', 'Chrome', '120.0.0.0'],
+            syncFullHistory: false,
+            markOnlineOnConnect: true,
+            defaultQueryTimeoutMs: 60000,
+        });
+
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            
+            if(qr) {
+                console.log('\n📱 ESCANEA ESTE CÓDIGO QR CON TU TELÉFONO PARA CONECTAR:\n');
+            }
+            
+            if(connection === 'close') {
+                const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+                
+                console.log('connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
+                
+                if(shouldReconnect && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    connectionAttempts++;
+                    setTimeout(() => connectToWhatsApp(), 3000);
+                } else if(connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                    console.error('[CRÍTICO] Máximo número de intentos de reconexión alcanzado');
+                    process.exit(1);
+                }
+            } 
+            else if(connection === 'open') {
+                connectionAttempts = 0;
+                console.log('\n==================================================');
+                console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está en la nube y conectado. 🎉');
+                console.log('==================================================\n');
+            }
+        });
+
+        sock.ev.on('creds.update', saveCreds);
+
+        // --- 4. COMANDOS ---
+        sock.ev.on('messages.upsert', async (m) => {
+            const msg = m.messages[0];
+            
+            if (!msg.message || msg.key.fromMe) return;
+            
+            const messageBody = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+            if (!messageBody.startsWith('!')) return;
+
+            const args = messageBody.slice(1).split(/ +/);
+            const command = args.shift().toLowerCase();
+            const jid = msg.key.remoteJid;
+
+            try {
+                switch (command) {
+                    case 'hola':
+                        await sock.sendMessage(jid, { text: '🤖 *¡Modo Pro Activo!* Hola, estoy corriendo estable 24/7.' });
+                        break;
+                    case 'status':
+                    case 'ping':
+                        const uptime = ((Date.now() - START_TIME) / 1000 / 60).toFixed(1);
+                        const memory = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
+                        await sock.sendMessage(jid, { text: `📊 *ESTADO*\n🟢 Operativo\n⏱️ ${uptime} min\n💾 RAM: ${memory} MB` });
+                        break;
+                    case 'reiniciar':
+                        await sock.sendMessage(jid, { text: '🔄 Reiniciando bot en la nube...' });
+                        setTimeout(() => { process.exit(0); }, 1500);
+                        break;
+                    default:
+                        await sock.sendMessage(jid, { text: '❓ Comando no reconocido. Usa: !hola, !status, !reiniciar' });
+                }
+            } catch (err) {
+                console.error('Error procesando mensaje:', err);
+            }
+        });
+
     } catch (err) {
-        console.error('Error al generar código:', err);
+        console.error('[ERROR] No se pudo conectar:', err);
+        connectionAttempts++;
+        if(connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+            setTimeout(() => connectToWhatsApp(), 5000);
+        }
     }
-}); // ← Cierra aquí correctamente
-
-client.on('ready', () => {
-    console.log('\n==================================================');
-    console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está en la nube y conectado. 🎉');
-    console.log('==================================================\n');
-});
-
-client.on('disconnected', (reason) => {
-    console.log(`[ALERTA] ❌ Bot desconectado. Razón: ${reason}`);
-    process.exit(1);
-});
-
-// --- 4. COMANDOS ---
-client.on('message', async (msg) => {
-    const messageBody = msg.body.trim();
-    if (!messageBody.startsWith('!')) return;
-
-    const args = messageBody.slice(1).split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    switch (command) {
-        case 'hola':
-            await msg.reply('🤖 *¡Modo Pro Activo!* Hola, estoy corriendo estable 24/7.');
-            break;
-        case 'status':
-        case 'ping':
-            const uptime = ((Date.now() - START_TIME) / 1000 / 60).toFixed(1);
-            const memory = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
-            await msg.reply(`📊 *ESTADO*\n🟢 Operativo\n⏱️ ${uptime} min\n💾 RAM: ${memory} MB`);
-            break;
-        case 'reiniciar':
-            await msg.reply('🔄 Reiniciando bot en la nube...');
-            setTimeout(() => { process.exit(0); }, 1500);
-            break;
-    }
-});
+}
 
 // --- 5. SALVAVIDAS ---
 process.on('unhandledRejection', (reason, p) => {
@@ -90,5 +122,4 @@ process.on('uncaughtException', (err) => {
     process.exit(1);
 });
 
-client.initialize();
-    
+connectToWhatsApp();
