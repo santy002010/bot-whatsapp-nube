@@ -43,6 +43,7 @@ client.on('qr', async (qr) => {
     } catch (err) {
         console.error('Error al generar código:', err);
     }
+}); // ← Cierra aquí correctamente
 
 client.on('ready', () => {
     console.log('\n==================================================');
