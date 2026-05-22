@@ -5,7 +5,7 @@ const express = require('express');
 // --- 1. CONFIGURACIÓN DEL SERVIDOR WEB (MONITOR DE RENDER) ---
 const app = express();
 const PORT = process.env.PORT || 10000;
-const START_TIME = Date.now(); // Guarda la hora exacta de encendido
+const START_TIME = Date.now();
 
 app.get('/', (req, res) => {
     const uptimeMinutes = ((Date.now() - START_TIME) / 1000 / 60).toFixed(2);
@@ -21,60 +21,55 @@ app.listen(PORT, () => {
     console.log(`[SERVER] 🌐 Monitor Express activo en el puerto ${PORT}`);
 });
 
-// --- 2. CONFIGURACIÓN OPTIMIZADA DEL CLIENTE (ANTI-ERRORES) ---
-console.log('[BOT] Inicializando motor de WhatsApp...');
+// --- 2. CONFIGURACIÓN OPTIMIZADA DEL CLIENTE (RUTA FIJA DE CHROME) ---
+console.log('[BOT] Inicializando motor de WhatsApp con ruta fija...');
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
+        // Forzamos a Puppeteer a usar el Chrome exacto que descargó Render
+        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--no-zygote',
-            '--single-process' // Truco Pro: Reduce drásticamente el consumo de RAM en Render
+            '--single-process'
         ]
     }
 });
 
 // --- 3. GESTIÓN DE EVENTOS DE CONEXIÓN ---
 
-// Evento: Generar QR
 client.on('qr', (qr) => {
-    console.log('\n[AUTH] 📌 Nuevo código QR generado. Escanéalo desde tu WhatsApp:');
+    console.log('\n[AUTH] 📌 NUEVO CÓDIGO QR GENERADO. ESCANÉALO ABAJO:');
     qrcode.generate(qr, { small: true });
 });
 
-// Evento: Conectado con éxito
 client.on('ready', () => {
     console.log('\n==================================================');
     console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está listo para usar. 🎉');
     console.log('==================================================\n');
 });
 
-// Evento: Desconexión Crítica
 client.on('disconnected', (reason) => {
-    console.log(`[ALERTA] ❌ Bot desconectado del teléfono. Razón: ${reason}`);
-    console.log('[SISTEMA] Reiniciando entorno para intentar re-vinculación...');
-    process.exit(1); // Render lo encenderá de nuevo limpio automáticamente
+    console.log(`[ALERTA] ❌ Bot desconectado. Razón: ${reason}`);
+    process.exit(1);
 });
 
-// --- 4. SISTEMA CENTRAL DE COMANDOS (Estructura Limpia) ---
+// --- 4. SISTEMA CENTRAL DE COMANDOS ---
 client.on('message', async (msg) => {
     const messageBody = msg.body.trim();
 
-    // Filtro: Solo responde si el mensaje empieza con tu prefijo (ej: !)
     if (!messageBody.startsWith('!')) return;
 
-    // Separa el comando de los argumentos
     const args = messageBody.slice(1).split(/ +/);
     const command = args.shift().toLowerCase();
 
     console.log(`[LOG] Comando ejecutado: !${command} | Por: ${msg.from}`);
 
     switch (command) {
-        
         case 'hola':
             await msg.reply('🤖 *¡Modo Pro Activo!* Hola, estoy corriendo de forma estable en la nube 24/7. ¿En qué puedo ayudarte hoy? 🔥');
             break;
@@ -95,34 +90,25 @@ client.on('message', async (msg) => {
 
         case 'reiniciar':
             await msg.reply('🔄 *Entendido.* Forzando reinicio del servidor en la nube... Dame unos 30 segundos.');
-            console.log('[SISTEMA] Reinicio solicitado por el usuario. Apagando proceso...');
             setTimeout(() => {
-                process.exit(0); // Render detecta el apagado y lo enciende al instante
+                process.exit(0);
             }, 1500);
             break;
 
-        // 💡 AQUÍ PUEDES SEGUIR AGREGANDO MÁS COMANDOS FÁCILMENTE:
-        // case 'ayuda':
-        //     await msg.reply('Lista de comandos...');
-        //     break;
-
         default:
-            // Si escriben un comando que no existe, el bot no hace nada (evita spam)
             break;
     }
 });
 
-// --- 5. SALVAVIDAS GLOBAL (Evita que el bot muera por errores imprevistos) ---
+// --- 5. SALVAVIDAS GLOBAL ---
 process.on('unhandledRejection', (reason, p) => {
     console.error('[ERROR] Rechazo no manejado en promesa:', p, 'Razón:', reason);
 });
 
 process.on('uncaughtException', (err) => {
     console.error('[ERROR CRÍTICO] Excepción no controlada:', err);
-    console.log('[SISTEMA] Ejecutando reinicio de emergencia preventivo...');
     process.exit(1);
 });
 
-// Encender el bot
 client.initialize();
-    
+        
