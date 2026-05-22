@@ -1,6 +1,8 @@
 const express = require('express');
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const QRCode = require('qrcode');
+const fs = require('fs');
 
 // --- 1. CONFIGURACIÓN DEL SERVIDOR WEB ---
 const app = express();
@@ -19,7 +21,7 @@ app.listen(PORT, () => {
 // --- 2. CONFIGURACIÓN DE BAILEYS ---
 console.log('[BOT] Inicializando motor de WhatsApp con Baileys...');
 
-const logger = pino({ level: 'error' });
+const logger = pino({ level: 'silent' });
 let sock;
 let connectionAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -31,11 +33,18 @@ async function connectToWhatsApp() {
         sock = makeWASocket({
             auth: state,
             logger: logger,
-            printQRInTerminal: true,
-            browser: ['Ubuntu', 'Chrome', '120.0.0.0'],
+            browser: ['Ubuntu', 'Chrome', '131.0.0.0'],
             syncFullHistory: false,
             markOnlineOnConnect: true,
-            defaultQueryTimeoutMs: 60000,
+            generateHighQualityLinkPreview: false,
+            getMessage: async (key) => {
+                if(state.messages[key.remoteJid]) {
+                    return state.messages[key.remoteJid][key.id] || undefined;
+                }
+                return {
+                    conversation: 'Mensaje no disponible',
+                };
+            },
         });
 
         sock.ev.on('connection.update', async (update) => {
@@ -43,16 +52,23 @@ async function connectToWhatsApp() {
             
             if(qr) {
                 console.log('\n📱 ESCANEA ESTE CÓDIGO QR CON TU TELÉFONO PARA CONECTAR:\n');
+                try {
+                    const qrString = await QRCode.toString(qr, { type: 'terminal', small: true });
+                    console.log(qrString);
+                } catch (err) {
+                    console.log(qr);
+                }
             }
             
             if(connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
                 
-                console.log('connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
+                console.log(`[DESCONEXIÓN] Razón: ${lastDisconnect?.error}, Reconectando: ${shouldReconnect}`);
                 
                 if(shouldReconnect && connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
                     connectionAttempts++;
-                    setTimeout(() => connectToWhatsApp(), 3000);
+                    console.log(`[INTENTO ${connectionAttempts}/${MAX_RECONNECT_ATTEMPTS}] Reconectando en 5 segundos...`);
+                    setTimeout(() => connectToWhatsApp(), 5000);
                 } else if(connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
                     console.error('[CRÍTICO] Máximo número de intentos de reconexión alcanzado');
                     process.exit(1);
@@ -72,7 +88,8 @@ async function connectToWhatsApp() {
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             
-            if (!msg.message || msg.key.fromMe) return;
+            if (!msg.message) return;
+            if (msg.key.fromMe) return;
             
             const messageBody = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
             if (!messageBody.startsWith('!')) return;
@@ -108,6 +125,7 @@ async function connectToWhatsApp() {
         console.error('[ERROR] No se pudo conectar:', err);
         connectionAttempts++;
         if(connectionAttempts < MAX_RECONNECT_ATTEMPTS) {
+            console.log(`[INTENTO ${connectionAttempts}/${MAX_RECONNECT_ATTEMPTS}] Reintentando en 5 segundos...`);
             setTimeout(() => connectToWhatsApp(), 5000);
         }
     }
