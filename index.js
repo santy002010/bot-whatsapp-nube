@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const express = require('express');
 
 // --- 1. CONFIGURACIÓN DEL SERVIDOR WEB ---
@@ -22,7 +21,6 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        // Eliminamos la ruta manual. La variable de entorno de Render hará el trabajo.
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -34,15 +32,26 @@ const client = new Client({
     }
 });
 
-// --- 3. EVENTOS DE CONEXIÓN ---
-client.on('qr', (qr) => {
-    console.log('\n[AUTH] 📌 NUEVO CÓDIGO QR GENERADO. ESCANÉALO ABAJO:');
-    qrcode.generate(qr, { small: true });
+// --- 3. EVENTO DE VINCULACIÓN POR CÓDIGO DE 8 DÍGITOS ---
+client.on('qr', async (qr) => {
+    // CAMBIA ESTO: Tu número de teléfono con código de país (Ej: 5491123456789)
+    // Sin espacios, sin el signo + y sin guiones.
+    const numeroTelefono = '5491128394646'; 
+
+    console.log(`\n[AUTH] 📲 Generando código de vinculación para el número: ${numeroTelefono}...`);
+    try {
+        const pairingCode = await client.requestPairingCode(numeroTelefono);
+        console.log('\n==================================================');
+        console.log(`🔑 TU CÓDIGO DE VINCULACIÓN ES: ${pairingCode}`);
+        console.log('==================================================\n');
+    } catch (err) {
+        console.error('[ERROR] No se pudo generar el código de 8 dígitos:', err);
+    }
 });
 
 client.on('ready', () => {
     console.log('\n==================================================');
-    console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está en la nube. 🎉');
+    console.log('🎉 ¡SISTEMA PRO ACTIVADO! El bot está en la nube y conectado. 🎉');
     console.log('==================================================\n');
 });
 
@@ -86,4 +95,4 @@ process.on('uncaughtException', (err) => {
 });
 
 client.initialize();
-                
+    
