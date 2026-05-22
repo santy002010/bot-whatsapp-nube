@@ -129,18 +129,25 @@ async function startBot() {
             }
         }, 300000); // 300000 ms = 5 minutos exactos
     }
-    sock.ev.on('connection.update', (update) => {
+        sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            console.log('\n[ALERTA] Conexión cerrada por WhatsApp. Esperando 10 segundos antes de reconectar para evitar bloqueos...\n');
-            // Le damos 10 segundos de respiro antes de volver a intentar conectar
+            // Verifica si ya vinculaste el bot o no
+            const yaVinculado = sock.authState.creds.registered;
+            
+            // Si ya está vinculado, reconecta en 10 segundos. Si NO, espera 5 MINUTOS (300000 ms)
+            const tiempoEspera = yaVinculado ? 10000 : 300000; 
+            
+            console.log(`\n[ALERTA] Conexión cerrada. Modo seguro: Esperando ${tiempoEspera / 1000} segundos antes de reiniciar...\n`);
+            
             setTimeout(() => {
                 startBot(); 
-            }, 10000);
+            }, tiempoEspera);
         } else if (connection === 'open') {
             console.log('\n🚀 [SISTEMA] ¡BOT ONLINE EN TU GRUPO! 🚀\n');
         }
     });
+
 
     
     // --- 6. COMANDOS ---
