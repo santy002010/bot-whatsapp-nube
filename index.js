@@ -350,27 +350,38 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            if (command === '/letras') {
+            if (command === '/letras' || command === '/letra') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Especificá qué canción querés buscar. Ejemplo: `/letras Cuarteto de Nos Roberto`' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Especificá qué canción querés buscar. Ejemplo: `/letra Cuarteto de Nos Roberto`' }, { quoted: msg });
                     return;
                 }
                 try {
-                    const res = await fetch(`https://lyrist.vercel.app/api/${encodeURIComponent(args)}`);
+                    // Cambiamos la API vieja por LRCLIB que es mucho más estable
+                    const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
+                    if (!res.ok) throw new Error('Error en la API');
+                    
                     const data = await res.json();
-                    if (data.lyrics) {
-                        const responseText = `🎵 *${data.title}* - _${data.artist}_\n\n${data.lyrics}`;
+                    
+                    // Buscamos el primer resultado que tenga la letra plana disponible (ignora tracks vacíos)
+                    const song = Array.isArray(data) ? data.find(s => s.plainLyrics) : null;
+
+                    if (song) {
+                        const titulo = song.trackName || song.name || 'Desconocido';
+                        const responseText = `🎵 *${titulo}* - _${song.artistName}_\n\n${song.plainLyrics}`;
                         await sock.sendMessage(from, { text: responseText }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No encontré la letra de esa canción.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No encontré la letra de esa canción. Asegurate de escribir bien el artista y el nombre.' }, { quoted: msg });
                     }
                 } catch (err) {
-                    await sock.sendMessage(from, { text: '❌ Error de conexión al buscar la letra.' }, { quoted: msg });
+                    console.error('[LETRAS ERROR]', err);
+                    await sock.sendMessage(from, { text: '❌ Error de conexión al buscar la letra. El servidor de música podría estar saturado.' }, { quoted: msg });
                 }
                 return;
             }
 
-            if (command === '/ruleta') {
+
+ 
+           if (command === '/ruleta') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Hacé una pregunta. Podés agregar la probabilidad al final (ej: `/ruleta apruebo? 1;10`).' }, { quoted: msg });
                     return;
