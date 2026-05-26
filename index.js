@@ -7,7 +7,7 @@ const {
     useMultiFileAuthState, 
     DisconnectReason, 
     delay,
-    fetchLatestBaileysVersion // 🔥 NUEVO: Necesario para evitar el error 405
+    fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
 
 // ==========================================
@@ -34,7 +34,6 @@ const HOST_NUMBER = '5491128394646';
 let botEnabled = true;
 let nsfwEnabled = false;
 
-// Directorio y base de datos para usuarios baneados
 const AUTH_DIR = path.join(__dirname, 'auth_session');
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
 
@@ -61,8 +60,7 @@ function saveBannedUsers(list) {
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-    // 🔥 CORRECCIÓN: Buscamos la última versión web para que WhatsApp no nos tire un 405
-    let version = [2, 3000, 1017551063]; // Versión de respaldo
+    let version = [2, 3000, 1017551063]; 
     try {
         const latest = await fetchLatestBaileysVersion();
         version = latest.version;
@@ -72,19 +70,35 @@ async function connectToWhatsApp() {
     }
 
     const sock = makeWASocket({
-        version, // 🔥 IMPORTANTE: Asignamos la versión actualizada
+        version, 
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false, // No usamos QR, usamos Pairing Code
-        browser: ["Ubuntu", "Chrome", "20.0.04"] // 🔥 IMPORTANTE: Camuflaje para Render
+        printQRInTerminal: false, 
+        browser: ["Ubuntu", "Chrome", "20.0.04"] 
     });
+
+    // 🌟 INYECCIÓN AUTOMÁTICA DEL PREFIJO [¡+!]
+    // Envolvemos el sendMessage original para no tener que editar cada comando uno por uno
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (jid, content, options) => {
+        if (content && typeof content === 'object') {
+            // Si es un mensaje de texto normal
+            if (content.text) {
+                content.text = `[¡+!]\n${content.text}`;
+            }
+            // Si es un mensaje con imagen, se lo pegamos al inicio del pie de foto (caption)
+            else if (content.image && content.caption) {
+                content.caption = `[¡+!]\n${content.caption}`;
+            }
+        }
+        return originalSendMessage(jid, content, options);
+    };
 
     // Mecanismo de Vinculación por Código
     if (!sock.authState.creds.registered) {
         console.log(`[VINCULACIÓN] Detectada falta de sesión. Generando código de emparejamiento...`);
         setTimeout(async () => {
             try {
-                // Verificamos que el socket siga abierto antes de pedir el código
                 let code = await sock.requestPairingCode(HOST_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join('-') || code;
                 console.log(`\n====================================`);
@@ -93,7 +107,7 @@ async function connectToWhatsApp() {
             } catch (err) {
                 console.error('[ERROR] No se pudo generar el código de vinculación:', err.message);
             }
-        }, 4000); // Subido a 4 segundos para dar estabilidad a la conexión inicial
+        }, 4000); 
     }
 
     // Manejo de eventos de conexión
@@ -104,7 +118,6 @@ async function connectToWhatsApp() {
             const reason = lastDisconnect?.error?.output?.statusCode;
             console.log(`[CONEXIÓN] Cerrada. Razón/Status Code: ${reason}`);
 
-            // Evaluar freno anti-spam por falta de sesión o expulsión
             if (reason === DisconnectReason.loggedOut || !sock.authState.creds.registered) {
                 console.log(`[ANTI-SPAM] Desconexión crítica (Falta de sesión/Expulsión). Reintentando en 5 minutos (300000ms)...`);
                 setTimeout(connectToWhatsApp, 300000);
@@ -124,17 +137,16 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+            if (!msg.message) return;
 
             const from = msg.key.remoteJid;
-            
-            // Filtro radical: Solo responder en el grupo permitido
             if (from !== ALLOWED_GROUP) return;
 
-            // Extraer el remitente (remitente en grupo)
-            const sender = msg.key.participant || msg.key.remoteJID;
+            let sender = msg.key.participant || msg.key.remoteJid;
+            if (msg.key.fromMe && sock.user) {
+                sender = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+            }
 
-            // Extraer texto del mensaje de múltiples estructuras posibles
             const text = msg.message.conversation || 
                          msg.message.extendedTextMessage?.text || 
                          msg.message.imageMessage?.caption || '';
@@ -149,7 +161,6 @@ async function connectToWhatsApp() {
             const bannedList = getBannedUsers();
             const isBanned = bannedList.includes(sender);
 
-            // Si el usuario está baneado y no es Admin, el bot lo ignora de forma silenciosa
             if (isBanned && !isAdmin) return;
 
             // ==========================================
@@ -222,7 +233,6 @@ async function connectToWhatsApp() {
                 }
             }
 
-            // Si el bot está apagado para los usuarios normales, bloqueamos la ejecución aquí
             if (!botEnabled && !isAdmin) return;
 
             // ==========================================
@@ -234,7 +244,6 @@ async function connectToWhatsApp() {
                     return;
                 }
 
-                // 🌟 HUEVO DE PASCUA: Cualquier búsqueda relacionada con Maxi tira esto
                 const checkMaxi = args.toLowerCase();
                 if (checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) {
                     await sock.sendMessage(from, { text: '🔍 *Resultado de Google:*\n\n✨ Basado en datos científicos e irrefutables: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
@@ -265,7 +274,6 @@ async function connectToWhatsApp() {
                     const posts = json?.data?.children || [];
 
                     let allowedPosts = posts;
-                    // Si el filtro NSFW está apagado, limpiamos las publicaciones marcadas como over_18
                     if (!nsfwEnabled) {
                         allowedPosts = posts.filter(p => !p.data.over_18);
                     }
@@ -275,7 +283,6 @@ async function connectToWhatsApp() {
                         return;
                     }
 
-                    // Intentamos localizar un post que contenga una URL de imagen directa
                     const imagePost = allowedPosts.find(p => p.data.url && (p.data.url.endsWith('.jpg') || p.data.url.endsWith('.png') || p.data.url.endsWith('.jpeg') || p.data.url.endsWith('.gif')));
 
                     if (imagePost) {
@@ -284,7 +291,6 @@ async function connectToWhatsApp() {
                             caption: `🤖 *${imagePost.data.title}*\n\nSubreddit: r/${imagePost.data.subreddit}\nLink: https://reddit.com${imagePost.data.permalink}` 
                         }, { quoted: msg });
                     } else {
-                        // En su defecto, mandamos la primera coincidencia puramente textual
                         const textPost = allowedPosts[0].data;
                         const bodyContent = textPost.selftext ? `\n\n${textPost.selftext.slice(0, 500)}...` : '';
                         await sock.sendMessage(from, { 
@@ -313,7 +319,6 @@ async function connectToWhatsApp() {
                     });
                     const html = await response.text();
                     
-                    // Regex específico para extraer las URLs de origen directo (murl) del HTML de Bing Images
                     const regex = /murl&quot;:&quot;(http.*?)&quot;/g;
                     let matches = [];
                     let match;
@@ -322,7 +327,6 @@ async function connectToWhatsApp() {
                     }
 
                     if (matches.length > 0) {
-                        // Enviamos la primera imagen válida obtenida del scraping
                         await sock.sendMessage(from, { 
                             image: { url: matches[0] }, 
                             caption: `🔍 *Resultado de Bing para:* ${args}` 
@@ -362,10 +366,9 @@ async function connectToWhatsApp() {
                     return;
                 }
 
-                // Intentamos capturar el formato X;Y al final del mensaje
                 const match = args.match(/(\d+);(\d+)\s*$/);
                 let siChance = 1;
-                let totalChance = 2; // Por defecto es 50/50 (1 de 2)
+                let totalChance = 2; 
                 let pregunta = args;
 
                 if (match) {
@@ -374,7 +377,7 @@ async function connectToWhatsApp() {
                     pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
 
                     if (siChance > totalChance || siChance <= 0 || totalChance <= 0) {
-                        await sock.sendMessage(from, { text: '⚠️ Probabilidades inválidas. El formato correcto es `1;10` (el primer número debe ser menor o igual al segundo).' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '⚠️ Probabilidades inválidas. El formato correcto es `1;10`.' }, { quoted: msg });
                         return;
                     }
                 }
@@ -382,12 +385,9 @@ async function connectToWhatsApp() {
                 const checkMaxi = pregunta.toLowerCase();
                 let resultado = '';
 
-                // 🌟 HUEVO DE PASCUA: Hackea la matemática de la ruleta
                 if (checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) {
-                    // Ignora completamente el azar y decreta que siempre sale SÍ
                     resultado = '🔴 SÍ';
                 } else {
-                    // Cálculo aleatorio normal
                     const random = Math.floor(Math.random() * totalChance) + 1;
                     resultado = random <= siChance ? '🔴 SÍ' : '⚫ NO';
                 }
@@ -402,5 +402,4 @@ async function connectToWhatsApp() {
     });
 }
 
-// Iniciar la ejecución del bot de forma segura
 connectToWhatsApp();
