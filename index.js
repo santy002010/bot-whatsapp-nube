@@ -350,21 +350,30 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            if (command === '/letras' || command === '/letra') {
+             if (command === '/letras' || command === '/letra') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Especificá qué canción querés buscar. Ejemplo: `/letra Cuarteto de Nos Roberto`' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Especificá qué canción querés buscar. Ejemplo: `/letra Roberto - Cuarteto de Nos`' }, { quoted: msg });
                     return;
                 }
                 try {
-                    const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
+                    let apiUrl = '';
                     
-                    // 1. Si la API se cae o nos bloquea temporalmente
+                    // Si ponés un guion (-), separamos la búsqueda para que sea súper exacta
+                    if (args.includes('-')) {
+                        const [cancion, artista] = args.split('-').map(str => str.trim());
+                        apiUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(cancion)}&artist_name=${encodeURIComponent(artista)}`;
+                    } else {
+                        // Búsqueda general si no ponés guion
+                        apiUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(args)}`;
+                    }
+
+                    const res = await fetch(apiUrl);
+                    
                     if (!res.ok) {
                         await sock.sendMessage(from, { text: '❌ El servidor de letras está fallando o saturado. Probá en un rato.' }, { quoted: msg });
                         return;
                     }
                     
-                    // 2. Extraemos el texto crudo primero (evita el crasheo silencioso si la API devuelve HTML en vez de datos)
                     const textData = await res.text();
                     let data;
                     try {
@@ -374,13 +383,11 @@ async function connectToWhatsApp() {
                         return;
                     }
                     
-                    // 3. Si la búsqueda no arroja NINGÚN resultado
                     if (!Array.isArray(data) || data.length === 0) {
-                        await sock.sendMessage(from, { text: `❌ No encontré ninguna canción con el nombre "${args}". Probá agregando el nombre del artista al lado.` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ No encontré ninguna canción con esos datos. Revisá que el nombre esté bien escrito.` }, { quoted: msg });
                         return;
                     }
                     
-                    // 4. Si encuentra resultados, buscamos el primero que sí tenga letra
                     const song = data.find(s => s.plainLyrics);
 
                     if (song) {
@@ -388,7 +395,7 @@ async function connectToWhatsApp() {
                         const responseText = `🎵 *${titulo}* - _${song.artistName}_\n\n${song.plainLyrics}`;
                         await sock.sendMessage(from, { text: responseText }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ Encontré la canción en la base de datos, pero lamentablemente nadie le subió la letra todavía 🥺' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ Encontré la canción, pero lamentablemente nadie le subió la letra todavía 🥺' }, { quoted: msg });
                     }
                 } catch (err) {
                     console.error('[LETRAS ERROR]', err);
