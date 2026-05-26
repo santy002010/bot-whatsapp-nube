@@ -33,6 +33,7 @@ const HOST_NUMBER = '5491128394646';
 
 let botEnabled = true;
 let nsfwEnabled = false;
+let modoTrucado = true; // 🔥 NUEVO: Control de respuestas tramposas (activado por defecto)
 
 const AUTH_DIR = path.join(__dirname, 'auth_session');
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
@@ -78,16 +79,12 @@ async function connectToWhatsApp() {
     });
 
     // 🌟 INYECCIÓN AUTOMÁTICA DEL PREFIJO [¡+!]
-    // Envolvemos el sendMessage original para no tener que editar cada comando uno por uno
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
-            // Si es un mensaje de texto normal
             if (content.text) {
                 content.text = `[¡+!]\n${content.text}`;
-            }
-            // Si es un mensaje con imagen, se lo pegamos al inicio del pie de foto (caption)
-            else if (content.image && content.caption) {
+            } else if (content.image && content.caption) {
                 content.caption = `[¡+!]\n${content.caption}`;
             }
         }
@@ -130,7 +127,6 @@ async function connectToWhatsApp() {
         }
     });
 
-    // Guardado automático de credenciales actualizadas
     sock.ev.on('creds.update', saveCreds);
 
     // Escucha e interpretación de mensajes incoming
@@ -196,6 +192,19 @@ async function connectToWhatsApp() {
                     return;
                 }
 
+                // 🔥 COMANDOS NUEVOS: MODO TRUCADO
+                if (command === '/modotrucadoon') {
+                    modoTrucado = true;
+                    await sock.sendMessage(from, { text: '🎭 *Modo Trucado Activado.* Las respuestas arregladas vuelven a funcionar.' }, { quoted: msg });
+                    return;
+                }
+
+                if (command === '/modotrucadooff') {
+                    modoTrucado = false;
+                    await sock.sendMessage(from, { text: '⚖️ *Modo Trucado Desactivado.* La ruleta (y las búsquedas) ahora son 100% legales y aleatorias.' }, { quoted: msg });
+                    return;
+                }
+
                 if (command === '/ban') {
                     const quotedParticipant = msg.message.extendedTextMessage?.contextInfo?.participant;
                     if (!quotedParticipant) {
@@ -244,8 +253,9 @@ async function connectToWhatsApp() {
                     return;
                 }
 
-                const checkMaxi = args.toLowerCase();
-                if (checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) {
+                const checkText = args.toLowerCase();
+                // Huevo de pascua también atado al modo trucado
+                if (modoTrucado && (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy')) {
                     await sock.sendMessage(from, { text: '🔍 *Resultado de Google:*\n\n✨ Basado en datos científicos e irrefutables: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
@@ -382,12 +392,21 @@ async function connectToWhatsApp() {
                     }
                 }
 
-                const checkMaxi = pregunta.toLowerCase();
+                const checkMsg = pregunta.toLowerCase();
                 let resultado = '';
 
-                if (checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) {
+                // 🔥 LÓGICA DEL MODO TRUCADO (Frases forzadas a salir SIEMPRE SÍ)
+                const isRiggedQuestion = (
+                    (checkMsg.includes('maxi') && checkMsg.includes('femboy')) ||
+                    (checkMsg.includes('dylan') && checkMsg.includes('perra')) ||
+                    (checkMsg.includes('omeguita'))
+                );
+
+                if (modoTrucado && isRiggedQuestion) {
+                    // Ignora el azar por completo
                     resultado = '🔴 SÍ';
                 } else {
+                    // Cálculo aleatorio normal
                     const random = Math.floor(Math.random() * totalChance) + 1;
                     resultado = random <= siChance ? '🔴 SÍ' : '⚫ NO';
                 }
