@@ -6,7 +6,8 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason, 
-    delay 
+    delay,
+    fetchLatestBaileysVersion // 🔥 NUEVO: Necesario para evitar el error 405
 } = require('@whiskeysockets/baileys');
 
 // ==========================================
@@ -60,10 +61,22 @@ function saveBannedUsers(list) {
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
+    // 🔥 CORRECCIÓN: Buscamos la última versión web para que WhatsApp no nos tire un 405
+    let version = [2, 3000, 1017551063]; // Versión de respaldo
+    try {
+        const latest = await fetchLatestBaileysVersion();
+        version = latest.version;
+        console.log(`[SISTEMA] Conectando con WhatsApp Web v${version.join('.')}`);
+    } catch (e) {
+        console.log(`[ALERTA] No se pudo obtener la última versión, usando respaldo.`);
+    }
+
     const sock = makeWASocket({
+        version, // 🔥 IMPORTANTE: Asignamos la versión actualizada
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false // No usamos QR, usamos Pairing Code
+        printQRInTerminal: false, // No usamos QR, usamos Pairing Code
+        browser: ["Ubuntu", "Chrome", "20.0.04"] // 🔥 IMPORTANTE: Camuflaje para Render
     });
 
     // Mecanismo de Vinculación por Código
@@ -71,15 +84,16 @@ async function connectToWhatsApp() {
         console.log(`[VINCULACIÓN] Detectada falta de sesión. Generando código de emparejamiento...`);
         setTimeout(async () => {
             try {
+                // Verificamos que el socket siga abierto antes de pedir el código
                 let code = await sock.requestPairingCode(HOST_NUMBER);
                 code = code?.match(/.{1,4}/g)?.join('-') || code;
                 console.log(`\n====================================`);
                 console.log(`CÓDIGO DE VINCULACIÓN EN RENDER: ${code}`);
                 console.log(`====================================\n`);
             } catch (err) {
-                console.error('[ERROR] No se pudo generar el código de vinculación:', err);
+                console.error('[ERROR] No se pudo generar el código de vinculación:', err.message);
             }
-        }, 3000);
+        }, 4000); // Subido a 4 segundos para dar estabilidad a la conexión inicial
     }
 
     // Manejo de eventos de conexión
@@ -369,8 +383,8 @@ async function connectToWhatsApp() {
                 let resultado = '';
 
                 // 🌟 HUEVO DE PASCUA: Hackea la matemática de la ruleta
-                if ((checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) && checkMaxi.includes('femboy')) {
-                    // Ignora el azar y decreta que siempre sale SÍ
+                if (checkMaxi.includes('maxi') || checkMaxi.includes('máximo')) {
+                    // Ignora completamente el azar y decreta que siempre sale SÍ
                     resultado = '🔴 SÍ';
                 } else {
                     // Cálculo aleatorio normal
