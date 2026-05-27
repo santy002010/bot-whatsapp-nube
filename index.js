@@ -247,7 +247,7 @@ async function connectToWhatsApp() {
             // ==========================================
             // 5. SECCIÓN DE COMANDOS PÚBLICOS
             // ==========================================
-             // 🧠 COMANDO GOOGLE (Conectado a la IA Gemini)
+            // 🧠 COMANDO GOOGLE (Conectado a la IA Gemini)
             if (command === '/google') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras. Ejemplo: `/google ¿Por qué el cielo es azul?`' }, { quoted: msg });
@@ -255,21 +255,14 @@ async function connectToWhatsApp() {
                 }
 
                 const checkText = args.toLowerCase();
-                // Sigue estando el huevito de pascua en la línea 258 ;)
+                // Huevo de pascua original mantenido intacto
                 if (typeof modoTrucado !== 'undefined' && modoTrucado && (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy')) {
                     await sock.sendMessage(from, { text: '🤖 *Respuesta de la IA:*\n\n✨ Analizando mis bases de datos cuánticas: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
 
                 try {
-                    // 👇 ACÁ TENÉS QUE PEGAR LA CLAVE DE GOOGLE AI STUDIO 👇
-                    const geminiApiKey = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey'; 
-                    
-                    if (geminiApiKey === 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey) {
-                         await sock.sendMessage(from, { text: '⚠️ El admin del bot todavía no configuró la clave de inteligencia artificial.' }, { quoted: msg });
-                         return;
-                    }
-
+                    const geminiApiKey = 'AIzaSyBTi3jT1d6o5JNSLGFzbfHtmGFpNbP4htY'; 
                     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                     const payload = { contents: [{ parts: [{ text: args }] }] };
                     
@@ -293,14 +286,13 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 👽 COMANDO REDDIT (Con filtro para la I mayúscula)
+            // 👽 COMANDO REDDIT (Con filtro inteligente de mayúsculas)
             if (command === '/reddit') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Especificá qué querés buscar en Reddit.' }, { quoted: msg });
                     return;
                 }
                 
-                // Detectamos la I mayúscula leyendo el texto original directamente
                 const isNsfwCommand = (typeof text !== 'undefined' && text.startsWith('/reddIt'));
 
                 if (isNsfwCommand && (typeof nsfwEnabled === 'undefined' || !nsfwEnabled)) {
@@ -351,7 +343,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 📌 COMANDO PIN (Filtro estricto de imágenes)
+            // 📌 COMANDO PIN (Búsqueda estricta de imágenes en Bing)
             if (command === '/pin') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Especificá la imagen que buscás.' }, { quoted: msg });
@@ -362,7 +354,7 @@ async function connectToWhatsApp() {
                     const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(args)}&adlt=${adltParam}`;
                     
                     const response = await fetch(bingUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                    const html = await response.text();
+                    const html = response.ok ? await response.text() : '';
                     
                     const regex = /murl&quot;:&quot;(https?:\/\/[^&]+?\.(?:jpg|jpeg|png))/gi;
                     let matches = [];
@@ -381,6 +373,7 @@ async function connectToWhatsApp() {
                 }
                 return;
             }
+
 
 
             if (command === '/letras' || command === '/letra') {
