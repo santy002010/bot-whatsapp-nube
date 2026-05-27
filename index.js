@@ -247,108 +247,141 @@ async function connectToWhatsApp() {
             // ==========================================
             // 5. SECCIÓN DE COMANDOS PÚBLICOS
             // ==========================================
+             // 🧠 COMANDO GOOGLE (Conectado a la IA Gemini)
             if (command === '/google') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Especificá qué querés buscar. Ejemplo: `/google Nikola Tesla`' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras. Ejemplo: `/google ¿Por qué el cielo es azul?`' }, { quoted: msg });
                     return;
                 }
 
                 const checkText = args.toLowerCase();
-                // Huevo de pascua también atado al modo trucado
-                if (modoTrucado && (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy')) {
-                    await sock.sendMessage(from, { text: '🔍 *Resultado de Google:*\n\n✨ Basado en datos científicos e irrefutables: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
+                // Sigue estando el huevito de pascua en la línea 258 ;)
+                if (typeof modoTrucado !== 'undefined' && modoTrucado && (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy')) {
+                    await sock.sendMessage(from, { text: '🤖 *Respuesta de la IA:*\n\n✨ Analizando mis bases de datos cuánticas: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
 
                 try {
-                    const res = await fetch(`https://es.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(args)}`);
-                    if (!res.ok) throw new Error('No se encontró información en Wikipedia.');
-                    const data = await res.json();
+                    // 👇 ACÁ TENÉS QUE PEGAR LA CLAVE DE GOOGLE AI STUDIO 👇
+                    const geminiApiKey = 'PEGAR_TU_CLAVE_AQUI'; 
                     
-                    const responseText = `📚 *${data.title}*\n\n${data.extract}`;
-                    await sock.sendMessage(from, { text: responseText }, { quoted: msg });
+                    if (geminiApiKey === 'PEGAR_TU_CLAVE_AQUI') {
+                         await sock.sendMessage(from, { text: '⚠️ El admin del bot todavía no configuró la clave de inteligencia artificial.' }, { quoted: msg });
+                         return;
+                    }
+
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                    const payload = { contents: [{ parts: [{ text: args }] }] };
+                    
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    const json = await res.json();
+                    
+                    if (json.candidates && json.candidates.length > 0) {
+                        const aiResponse = json.candidates[0].content.parts[0].text;
+                        await sock.sendMessage(from, { text: `🧠 *Inteligencia Artificial:*\n\n${aiResponse}` }, { quoted: msg });
+                    } else {
+                        await sock.sendMessage(from, { text: '❌ Mi cerebro artificial no pudo procesar tu pregunta.' }, { quoted: msg });
+                    }
                 } catch (err) {
-                    await sock.sendMessage(from, { text: '❌ No se encontraron resultados o hubo un error con Wikipedia.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '❌ Error al conectarse con la inteligencia artificial.' }, { quoted: msg });
                 }
                 return;
             }
 
+            // 👽 COMANDO REDDIT (Con filtro para la I mayúscula)
             if (command === '/reddit') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Especificá qué querés buscar en Reddit.' }, { quoted: msg });
                     return;
                 }
-                try {
-                    const res = await fetch(`https://www.reddit.com/search.json?q=${encodeURIComponent(args)}`);
-                    const json = await res.json();
-                    const posts = json?.data?.children || [];
+                
+                // Detectamos la I mayúscula leyendo el texto original directamente
+                const isNsfwCommand = (typeof text !== 'undefined' && text.startsWith('/reddIt'));
 
-                    let allowedPosts = posts;
-                    if (!nsfwEnabled) {
-                        allowedPosts = posts.filter(p => !p.data.over_18);
+                if (isNsfwCommand && (typeof nsfwEnabled === 'undefined' || !nsfwEnabled)) {
+                    await sock.sendMessage(from, { text: '🔞 *Acceso Denegado.* Este comando requiere que un admin active el `/+18on`.' }, { quoted: msg });
+                    return;
+                }
+
+                try {
+                    let searchUrl = '';
+                    if (isNsfwCommand) {
+                        searchUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(args + ' nsfw confesion relato text')}&include_over_18=on&sort=top&limit=25`;
+                    } else {
+                        searchUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&sort=hot&limit=25`;
                     }
 
-                    if (allowedPosts.length === 0) {
-                        await sock.sendMessage(from, { text: '❌ No se encontraron posts (o el contenido fue filtrado por NSFW).' }, { quoted: msg });
+                    const res = await fetch(searchUrl, { headers: { 'User-Agent': 'BotWhatsApp/1.0.0 (by Maxi)' } });
+                    const json = await res.json();
+                    let posts = json?.data?.children || [];
+
+                    if (isNsfwCommand) {
+                        posts = posts.filter(p => p.data.over_18 && p.data.selftext && p.data.selftext.length > 150);
+                    } else if (typeof nsfwEnabled !== 'undefined' && !nsfwEnabled) {
+                        posts = posts.filter(p => !p.data.over_18);
+                    }
+
+                    if (posts.length === 0) {
+                        await sock.sendMessage(from, { text: '❌ No se encontraron resultados o fueron bloqueados por los filtros.' }, { quoted: msg });
                         return;
                     }
 
-                    const imagePost = allowedPosts.find(p => p.data.url && (p.data.url.endsWith('.jpg') || p.data.url.endsWith('.png') || p.data.url.endsWith('.jpeg') || p.data.url.endsWith('.gif')));
+                    const randomLimit = Math.min(5, posts.length);
+                    const selectedPost = posts[Math.floor(Math.random() * randomLimit)].data;
 
-                    if (imagePost) {
+                    if (selectedPost.url && !selectedPost.is_self && (selectedPost.url.endsWith('.jpg') || selectedPost.url.endsWith('.png'))) {
                         await sock.sendMessage(from, { 
-                            image: { url: imagePost.data.url }, 
-                            caption: `🤖 *${imagePost.data.title}*\n\nSubreddit: r/${imagePost.data.subreddit}\nLink: https://reddit.com${imagePost.data.permalink}` 
+                            image: { url: selectedPost.url }, 
+                            caption: `🤖 *${selectedPost.title}*\nSubreddit: r/${selectedPost.subreddit}\nLink: https://reddit.com${selectedPost.permalink}` 
                         }, { quoted: msg });
                     } else {
-                        const textPost = allowedPosts[0].data;
-                        const bodyContent = textPost.selftext ? `\n\n${textPost.selftext.slice(0, 500)}...` : '';
+                        const bodyContent = selectedPost.selftext ? `\n\n${selectedPost.selftext.slice(0, 800)}...` : '';
                         await sock.sendMessage(from, { 
-                            text: `🤖 *${textPost.title}*\nSubreddit: r/${textPost.subreddit}${bodyContent}\n\nLink: ${textPost.url}` 
+                            text: `🤖 *${selectedPost.title}*\nSubreddit: r/${selectedPost.subreddit}${bodyContent}\n\nLink: https://reddit.com${selectedPost.permalink}` 
                         }, { quoted: msg });
                     }
                 } catch (err) {
-                    await sock.sendMessage(from, { text: '❌ Error al conectar con la API de Reddit.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '❌ Error de conexión al buscar en Reddit.' }, { quoted: msg });
                 }
                 return;
             }
 
+            // 📌 COMANDO PIN (Filtro estricto de imágenes)
             if (command === '/pin') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Especificá la imagen que buscás en Bing.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Especificá la imagen que buscás.' }, { quoted: msg });
                     return;
                 }
                 try {
-                    const adltParam = nsfwEnabled ? 'off' : 'strict';
+                    const adltParam = (typeof nsfwEnabled !== 'undefined' && nsfwEnabled) ? 'off' : 'strict';
                     const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(args)}&adlt=${adltParam}`;
                     
-                    const response = await fetch(bingUrl, {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-                        }
-                    });
+                    const response = await fetch(bingUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
                     const html = await response.text();
                     
-                    const regex = /murl&quot;:&quot;(http.*?)&quot;/g;
+                    const regex = /murl&quot;:&quot;(https?:\/\/[^&]+?\.(?:jpg|jpeg|png))/gi;
                     let matches = [];
                     let match;
-                    while ((match = regex.exec(html)) !== null) {
-                        matches.push(match[1]);
-                    }
+                    while ((match = regex.exec(html)) !== null) { matches.push(match[1]); }
+                    matches = [...new Set(matches)];
 
                     if (matches.length > 0) {
-                        await sock.sendMessage(from, { 
-                            image: { url: matches[0] }, 
-                            caption: `🔍 *Resultado de Bing para:* ${args}` 
-                        }, { quoted: msg });
+                        const index = Math.floor(Math.random() * Math.min(4, matches.length));
+                        await sock.sendMessage(from, { image: { url: matches[index] }, caption: `🔍 *Resultado:* ${args}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes para esa búsqueda.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes coherentes.' }, { quoted: msg });
                     }
                 } catch (err) {
-                    await sock.sendMessage(from, { text: '❌ Error al realizar el scraping en el motor de Bing.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '❌ Error interno al procesar las imágenes.' }, { quoted: msg });
                 }
                 return;
             }
+
 
              if (command === '/letras' || command === '/letra') {
                 if (!args) {
