@@ -263,9 +263,9 @@ async function connectToWhatsApp() {
 
                 try {
                     // 👇 ACÁ TENÉS QUE PEGAR LA CLAVE DE GOOGLE AI STUDIO 👇
-                    const geminiApiKey = 'PEGAR_TU_CLAVE_AQUI'; 
+                    const geminiApiKey = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey'; 
                     
-                    if (geminiApiKey === 'PEGAR_TU_CLAVE_AQUI') {
+                    if (geminiApiKey === 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey) {
                          await sock.sendMessage(from, { text: '⚠️ El admin del bot todavía no configuró la clave de inteligencia artificial.' }, { quoted: msg });
                          return;
                     }
@@ -383,41 +383,43 @@ async function connectToWhatsApp() {
             }
 
 
-             if (command === '/letras' || command === '/letra') {
+            if (command === '/letras' || command === '/letra') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Especificá qué canción querés buscar. Ejemplo: `/letra Roberto - Cuarteto de Nos`' }, { quoted: msg });
                     return;
                 }
                 try {
-                    let apiUrl = '';
+                    let data = [];
                     
-                    // Si ponés un guion (-), separamos la búsqueda para que sea súper exacta
+                    // Si usás guion, intentamos la búsqueda súper exacta primero
                     if (args.includes('-')) {
                         const [cancion, artista] = args.split('-').map(str => str.trim());
-                        apiUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(cancion)}&artist_name=${encodeURIComponent(artista)}`;
+                        const exactUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(cancion)}&artist_name=${encodeURIComponent(artista)}`;
+                        
+                        let res = await fetch(exactUrl);
+                        if (res.ok) {
+                            try { data = JSON.parse(await res.text()); } catch(e) {}
+                        }
+                        
+                        // 🔥 PLAN B: Si la exacta falló (por un typo o nombre raro), probamos una búsqueda general flexible
+                        if (!Array.isArray(data) || data.length === 0) {
+                            const fallbackUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(cancion + ' ' + artista)}`;
+                            res = await fetch(fallbackUrl);
+                            if (res.ok) {
+                                try { data = JSON.parse(await res.text()); } catch(e) {}
+                            }
+                        }
                     } else {
-                        // Búsqueda general si no ponés guion
-                        apiUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(args)}`;
-                    }
-
-                    const res = await fetch(apiUrl);
-                    
-                    if (!res.ok) {
-                        await sock.sendMessage(from, { text: '❌ El servidor de letras está fallando o saturado. Probá en un rato.' }, { quoted: msg });
-                        return;
-                    }
-                    
-                    const textData = await res.text();
-                    let data;
-                    try {
-                        data = JSON.parse(textData);
-                    } catch (e) {
-                        await sock.sendMessage(from, { text: '❌ El servidor devolvió datos corruptos. No se pudo procesar tu búsqueda.' }, { quoted: msg });
-                        return;
+                        // Si no pusiste guion, va directo a la general
+                        const generalUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(args)}`;
+                        const res = await fetch(generalUrl);
+                        if (res.ok) {
+                            try { data = JSON.parse(await res.text()); } catch(e) {}
+                        }
                     }
                     
                     if (!Array.isArray(data) || data.length === 0) {
-                        await sock.sendMessage(from, { text: `❌ No encontré ninguna canción con esos datos. Revisá que el nombre esté bien escrito.` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ No encontré la canción. Revisá que la ortografía del artista y la canción estén bien.` }, { quoted: msg });
                         return;
                     }
                     
@@ -432,10 +434,11 @@ async function connectToWhatsApp() {
                     }
                 } catch (err) {
                     console.error('[LETRAS ERROR]', err);
-                    await sock.sendMessage(from, { text: '❌ Ocurrió un error interno al intentar conectarse con el buscador de letras.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '❌ Ocurrió un error interno en el buscador de letras.' }, { quoted: msg });
                 }
                 return;
             }
+
 
 
 
