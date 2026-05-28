@@ -168,63 +168,51 @@ async function connectToWhatsApp() {
             // --- COMANDOS PÚBLICOS ---
 
             // 🎲 RULETA (Corregida con Randomizer y Probabilidades)
-            if (command === '/ruleta') {
+if (command === '/ruleta') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Escribí opciones, una pregunta o una probabilidad (ej: 1;100).' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Hacé una pregunta. Podés agregar la probabilidad al final (ej: `/ruleta apruebo? 1;10`).' }, { quoted: msg });
                     return;
                 }
-                
-                let result = "";
-                let probText = "";
-                
-                // 1. Detectar si el usuario mandó una probabilidad (Ej: 1;100 o 1/100)
-                const probMatch = args.match(/^(\d+)[;/](\d+)$/);
-                
-                if (probMatch) {
-                    const probYes = parseInt(probMatch[1]);
-                    const total = parseInt(probMatch[2]);
-                    
-                    if (probYes >= 0 && total > 0 && probYes <= total) {
-                        const rand = Math.floor(Math.random() * total) + 1;
-                        if (rand <= probYes) {
-                            result = "🟥 Sí";
-                        } else {
-                            result = "⬛ No";
-                        }
-                        probText = ` (${probYes} en ${total})`;
-                    } else {
-                        await sock.sendMessage(from, { text: '⚠️ Formato inválido. Usá algo como 1;100.' }, { quoted: msg });
+
+                const match = args.match(/(\d+);(\d+)\s*$/);
+                let siChance = 1;
+                let totalChance = 2; 
+                let pregunta = args;
+
+                if (match) {
+                    siChance = parseInt(match[1]);
+                    totalChance = parseInt(match[2]);
+                    pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
+
+                    if (siChance > totalChance || siChance <= 0 || totalChance <= 0) {
+                        await sock.sendMessage(from, { text: '⚠️ Probabilidades inválidas. El formato correcto es `1;10`.' }, { quoted: msg });
                         return;
                     }
+                }
+
+                const checkMsg = pregunta.toLowerCase();
+                let resultado = '';
+
+                // 🔥 LÓGICA DEL MODO TRUCADO (Frases forzadas a salir SIEMPRE SÍ)
+                const isRiggedQuestion = (
+                    (checkMsg.includes('maxi') && checkMsg.includes('femboy')) ||
+                    (checkMsg.includes('dylan') && checkMsg.includes('perra')) ||
+                    (checkMsg.includes('omeguita'))
+                );
+
+                if (modoTrucado && isRiggedQuestion) {
+                    // Ignora el azar por completo
+                    resultado = '🔴 SÍ';
                 } else {
-                    // 2. Lógica aleatoria normal (Preguntas u opciones con comas)
-                    let opciones = args.split(',').map(op => op.trim()).filter(op => op !== '');
-                    if (opciones.length < 2) {
-                        opciones = ['🟥 Sí', '⬛ No', 'Tal vez', 'Definitivamente no', 'Claro que sí'];
-                    }
-                    result = opciones[Math.floor(Math.random() * opciones.length)];
-                    
-                    // Colorear respuestas si cayeron en el Sí o No genérico de la ruleta
-                    if (/^(si|sí)$/i.test(result)) result = '🟥 Sí';
-                    if (/^no$/i.test(result)) result = '⬛ No';
+                    // Cálculo aleatorio normal
+                    const random = Math.floor(Math.random() * totalChance) + 1;
+                    resultado = random <= siChance ? '🔴 SÍ' : '⚫ NO';
                 }
 
-                // 3. Modo Trucado (Solo se aplica y pisa el resultado si es una de las preguntas clave)
-                if (modoTrucado) {
-                    const checkText = args.toLowerCase();
-                    const trampaMaxi = (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy');
-                    const trampaDylan = checkText.includes('dylan') && checkText.includes('perra');
-                    const trampaBot = (checkText.includes('bot') || checkText.includes('ia') || checkText.includes('vos')) && checkText.includes('omeguita');
-
-                    if (trampaMaxi || trampaDylan || trampaBot) {
-                        result = "🟥 ¡Sí, absolutamente! ✨";
-                        probText = ""; // Oculta los números si está trucado
-                    }
-                }
-
-                await sock.sendMessage(from, { text: `🎲 *Girando la ruleta...*\n\n🎯 Resultado: ${result}${probText}` }, { quoted: msg });
+                await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultado}* (Probabilidad: ${siChance} de ${totalChance})` }, { quoted: msg });
                 return;
             }
+
 
             // 🧠 GOOGLE (Gemini - Con API restaurada y capturador de errores)
             if (command === '/google') {
