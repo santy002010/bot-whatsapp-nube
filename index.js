@@ -167,35 +167,66 @@ async function connectToWhatsApp() {
 
             // --- COMANDOS PÚBLICOS ---
 
-            // 🎲 RULETA 
+            // 🎲 RULETA (Corregida con Randomizer y Probabilidades)
             if (command === '/ruleta') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Escribí opciones separadas por comas o haceme una pregunta.' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Escribí opciones, una pregunta o una probabilidad (ej: 1;100).' }, { quoted: msg });
                     return;
                 }
-                const checkText = args.toLowerCase();
+                
+                let result = "";
+                let probText = "";
+                
+                // 1. Detectar si el usuario mandó una probabilidad (Ej: 1;100 o 1/100)
+                const probMatch = args.match(/^(\d+)[;/](\d+)$/);
+                
+                if (probMatch) {
+                    const probYes = parseInt(probMatch[1]);
+                    const total = parseInt(probMatch[2]);
+                    
+                    if (probYes >= 0 && total > 0 && probYes <= total) {
+                        const rand = Math.floor(Math.random() * total) + 1;
+                        if (rand <= probYes) {
+                            result = "🟥 Sí";
+                        } else {
+                            result = "⬛ No";
+                        }
+                        probText = ` (${probYes} en ${total})`;
+                    } else {
+                        await sock.sendMessage(from, { text: '⚠️ Formato inválido. Usá algo como 1;100.' }, { quoted: msg });
+                        return;
+                    }
+                } else {
+                    // 2. Lógica aleatoria normal (Preguntas u opciones con comas)
+                    let opciones = args.split(',').map(op => op.trim()).filter(op => op !== '');
+                    if (opciones.length < 2) {
+                        opciones = ['🟥 Sí', '⬛ No', 'Tal vez', 'Definitivamente no', 'Claro que sí'];
+                    }
+                    result = opciones[Math.floor(Math.random() * opciones.length)];
+                    
+                    // Colorear respuestas si cayeron en el Sí o No genérico de la ruleta
+                    if (/^(si|sí)$/i.test(result)) result = '🟥 Sí';
+                    if (/^no$/i.test(result)) result = '⬛ No';
+                }
 
+                // 3. Modo Trucado (Solo se aplica y pisa el resultado si es una de las preguntas clave)
                 if (modoTrucado) {
+                    const checkText = args.toLowerCase();
                     const trampaMaxi = (checkText.includes('maxi') || checkText.includes('máximo')) && checkText.includes('femboy');
                     const trampaDylan = checkText.includes('dylan') && checkText.includes('perra');
                     const trampaBot = (checkText.includes('bot') || checkText.includes('ia') || checkText.includes('vos')) && checkText.includes('omeguita');
 
                     if (trampaMaxi || trampaDylan || trampaBot) {
-                        await sock.sendMessage(from, { text: `🎲 *Haciendo girar la ruleta...*\n\n🎯 Cayó en: *¡Sí, absolutamente!* ✨` }, { quoted: msg });
-                        return;
+                        result = "🟥 ¡Sí, absolutamente! ✨";
+                        probText = ""; // Oculta los números si está trucado
                     }
                 }
 
-                let opciones = args.split(',').map(op => op.trim()).filter(op => op !== '');
-                if (opciones.length < 2) {
-                    opciones = ['Sí', 'No', 'Tal vez', 'Definitivamente no', 'Claro que sí', 'Ni lo sueñes'];
-                }
-                const seleccion = opciones[Math.floor(Math.random() * opciones.length)];
-                await sock.sendMessage(from, { text: `🎲 *Haciendo girar la ruleta...*\n\n🎯 Cayó en: *${seleccion}*` }, { quoted: msg });
+                await sock.sendMessage(from, { text: `🎲 *Girando la ruleta...*\n\n🎯 Resultado: ${result}${probText}` }, { quoted: msg });
                 return;
             }
 
-            // 🧠 GOOGLE (Gemini)
+            // 🧠 GOOGLE (Gemini - Con API restaurada y capturador de errores)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -205,9 +236,8 @@ async function connectToWhatsApp() {
                 }
 
                 try {
-                    // AQUÍ DEBES PONER TU NUEVA API KEY
+                    // Tu API KEY exacta devuelta al código
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    
                     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
                     
                     const res = await fetch(url, {
@@ -215,20 +245,26 @@ async function connectToWhatsApp() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
                     });
+                    
                     const json = await res.json();
                     
+                    if (json.error) {
+                        await sock.sendMessage(from, { text: `❌ Google rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
+                        return;
+                    }
+
                     if (json.candidates) {
                         await sock.sendMessage(from, { text: `🧠 *IA:*\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta. (Revisá si la API Key es válida)' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
                     }
                 } catch (e) { 
-                    await sock.sendMessage(from, { text: '❌ Error de conexión con Google.' }, { quoted: msg }); 
+                    await sock.sendMessage(from, { text: `❌ Fallo en fetch: ${e.message}` }, { quoted: msg }); 
                 }
                 return;
             }
 
-            // 👽 REDDIT 
+            // 👽 REDDIT (Con User-Agent robusto)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg }); return; }
                 const isNsfwCommand = text.startsWith('/reddIt');
@@ -244,13 +280,14 @@ async function connectToWhatsApp() {
 
                     const res = await fetch(url, { 
                         headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                            'Accept': 'application/json'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                            'Accept': 'application/json, text/plain, */*',
+                            'Accept-Language': 'es-ES,es;q=0.9'
                         } 
                     });
                     
                     if (!res.ok) {
-                        await sock.sendMessage(from, { text: `❌ Reddit bloqueó la conexión (Error ${res.status}).` }, { quoted: msg }); return;
+                        await sock.sendMessage(from, { text: `❌ Error de servidor Reddit (Código ${res.status}). Intentá buscar en inglés o probá en unos minutos.` }, { quoted: msg }); return;
                     }
 
                     const json = await res.json();
@@ -260,7 +297,7 @@ async function connectToWhatsApp() {
                         ? posts.filter(p => p.data.over_18 && p.data.selftext?.length > 150)
                         : posts.filter(p => !p.data.over_18);
 
-                    if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados.' }, { quoted: msg }); return; }
+                    if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
 
                     const post = posts[Math.floor(Math.random() * Math.min(5, posts.length))].data;
                     const suffix = `\nSubreddit: r/${post.subreddit}\nLink: https://reddit.com${post.permalink}`;
@@ -271,25 +308,33 @@ async function connectToWhatsApp() {
                         const body = post.selftext ? `\n\n${post.selftext.slice(0, 800)}...` : '';
                         await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { text: '❌ Error al conectar con Reddit.' }, { quoted: msg }); }
+                } catch (e) { await sock.sendMessage(from, { text: `❌ Error al conectar con Reddit: ${e.message}` }, { quoted: msg }); }
                 return;
             }
 
-            // 📌 PIN 
+            // 📌 PIN (Bing re-estructurado)
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá la imagen.' }, { quoted: msg }); return; }
                 try {
                     const adltParam = nsfwEnabled ? 'off' : 'strict';
-                    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(args)}&adlt=${adltParam}&form=HDRSC3`;
+                    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(args)}&adlt=${adltParam}&first=1&ptn=32&FORM=IARRSM`;
                     
                     const response = await fetch(bingUrl, { 
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } 
+                        headers: { 
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                            'Accept-Language': 'es-ES,es;q=0.9',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                        } 
                     });
-                    const html = response.ok ? await response.text() : '';
                     
-                    let matches = [...html.matchAll(/(?:murl&quot;:&quot;|murl":")(https?:\/\/[^"&]+?\.(?:jpg|jpeg|png))/gi)].map(m => m[1]);
+                    if (!response.ok) {
+                        await sock.sendMessage(from, { text: `❌ Bing bloqueó la solicitud (Código ${response.status}).` }, { quoted: msg });
+                        return;
+                    }
+
+                    const html = await response.text();
+                    let matches = [...html.matchAll(/murl&quot;:&quot;(https?:\/\/[^&"]+?\.(?:jpg|jpeg|png))/gi)].map(m => m[1]);
                     
-                    // Filtramos imágenes basura (miniaturas, avatares, etc.)
                     matches = matches.filter(url => !url.includes('th?id=') && !url.includes('favicon') && !url.includes('profile'));
                     matches = [...new Set(matches)];
 
@@ -297,9 +342,9 @@ async function connectToWhatsApp() {
                         const url = matches[Math.floor(Math.random() * Math.min(3, matches.length))];
                         await sock.sendMessage(from, { image: { url }, caption: `🔍 *Resultado:* ${args}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes válidas.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes de buena calidad.' }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { text: '❌ Error interno al buscar la imagen.' }, { quoted: msg }); }
+                } catch (e) { await sock.sendMessage(from, { text: `❌ Error interno al buscar la imagen: ${e.message}` }, { quoted: msg }); }
                 return;
             }
 
@@ -326,7 +371,6 @@ async function connectToWhatsApp() {
                     
                     const track = data[0];
                     
-                    // Priorizamos la letra limpia. Si solo hay con tiempos, se los borramos con Regex.
                     let lyrics = track.plainLyrics;
                     if (!lyrics && track.syncedLyrics) {
                         lyrics = track.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
