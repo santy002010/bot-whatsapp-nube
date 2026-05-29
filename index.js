@@ -245,7 +245,7 @@ if (command === '/ruleta') {
                     }
 
                     if (json.candidates) {
-                        await sock.sendMessage(from, { text: `🧠 *IA:*\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `🔴⚫:*\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
                     }
@@ -255,9 +255,9 @@ if (command === '/ruleta') {
                 return;
             }
  
-            // 👽 REDDIT (Con User-Agent robusto)
+            // 👽 REDDIT (Espejo PullPush anti-bloqueos)
             if (command === '/reddit') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg }); return; }
+                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
                 const isNsfwCommand = text.startsWith('/reddIt');
 
                 if (isNsfwCommand && !nsfwEnabled) {
@@ -265,77 +265,78 @@ if (command === '/ruleta') {
                 }
 
                 try {
-                    const url = isNsfwCommand 
-                        ? `https://www.reddit.com/search.json?q=${encodeURIComponent(args + ' nsfw')}&include_over_18=on&sort=top&limit=25`
-                        : `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&sort=hot&limit=25`;
-
-                    const res = await fetch(url, { 
-                        headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                            'Accept': 'application/json, text/plain, */*',
-                            'Accept-Language': 'es-ES,es;q=0.9'
-                        } 
+                    // Usamos PullPush para saltarnos el bloqueo de IP de Reddit a servidores cloud
+                    let url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(args)}&size=50`;
+                    
+                    const res = await fetch(url, {
+                        headers: { 'User-Agent': 'Mozilla/5.0' }
                     });
                     
                     if (!res.ok) {
-                        await sock.sendMessage(from, { text: `❌ Error de servidor Reddit (Código ${res.status}). Intentá buscar en inglés o probá en unos minutos.` }, { quoted: msg }); return;
+                        await sock.sendMessage(from, { text: `❌ El servidor espejo de Reddit no respondió (Código ${res.status}).` }, { quoted: msg }); return;
                     }
 
                     const json = await res.json();
-                    let posts = json?.data?.children || [];
+                    let posts = json?.data || [];
 
+                    // Filtrado estricto +18 o Seguro
                     posts = isNsfwCommand 
-                        ? posts.filter(p => p.data.over_18 && p.data.selftext?.length > 150)
-                        : posts.filter(p => !p.data.over_18);
+                        ? posts.filter(p => p.over_18)
+                        : posts.filter(p => !p.over_18);
 
                     if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
 
-                    const post = posts[Math.floor(Math.random() * Math.min(5, posts.length))].data;
-                    const suffix = `\nSubreddit: r/${post.subreddit}\nLink: https://reddit.com${post.permalink}`;
+                    // Agarra un post aleatorio de la lista
+                    const post = posts[Math.floor(Math.random() * Math.min(10, posts.length))];
+                    const permalink = post.permalink ? `https://reddit.com${post.permalink}` : `https://reddit.com/r/${post.subreddit}`;
+                    const suffix = `\n\nSubreddit: r/${post.subreddit || 'unknown'}\nLink: ${permalink}`;
 
-                    if (post.url && !post.is_self && (post.url.endsWith('.jpg') || post.url.endsWith('.png'))) {
+                    // Detecta si el post contiene link de imagen directo
+                    const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
+
+                    if (tieneImagen) {
                         await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
                     } else {
-                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 800)}...` : '';
+                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 600)}...` : '';
                         await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { text: `❌ Error al conectar con Reddit: ${e.message}` }, { quoted: msg }); }
+                } catch (e) { 
+                    await sock.sendMessage(from, { text: `❌ Error de red con Reddit: ${e.message}` }, { quoted: msg }); 
+                }
                 return;
             }
-
-            // 📌 PIN (Bing re-estructurado)
+             // 📌 PIN (Buscador directo de Pinterest)
             if (command === '/pin') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá la imagen.' }, { quoted: msg }); return; }
+                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
-                    const adltParam = nsfwEnabled ? 'off' : 'strict';
-                    const bingUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(args)}&adlt=${adltParam}&first=1&ptn=32&FORM=IARRSM`;
-                    
-                    const response = await fetch(bingUrl, { 
+                    const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
+                    const response = await fetch(url, { 
                         headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                            'Accept-Language': 'es-ES,es;q=0.9',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
                         } 
                     });
                     
                     if (!response.ok) {
-                        await sock.sendMessage(from, { text: `❌ Bing bloqueó la solicitud (Código ${response.status}).` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ Pinterest no respondió correctamente.' }, { quoted: msg });
                         return;
                     }
 
                     const html = await response.text();
-                    let matches = [...html.matchAll(/murl&quot;:&quot;(https?:\/\/[^&"]+?\.(?:jpg|jpeg|png))/gi)].map(m => m[1]);
                     
-                    matches = matches.filter(url => !url.includes('th?id=') && !url.includes('favicon') && !url.includes('profile'));
-                    matches = [...new Set(matches)];
+                    // Filtramos las imágenes del entramado de Pinterest (calidad 736x)
+                    let matches = [...html.matchAll(/https:\/\/i\.pinimg\.com\/736x\/[^"'\s>]+/gi)].map(m => m[0]);
+                    matches = [...new Set(matches)]; // Borramos duplicados
 
                     if (matches.length > 0) {
-                        const url = matches[Math.floor(Math.random() * Math.min(3, matches.length))];
-                        await sock.sendMessage(from, { image: { url }, caption: `🔍 *Resultado:* ${args}` }, { quoted: msg });
+                        // Elegimos una imagen al azar de las primeras 6 que encontró
+                        const imgUrl = matches[Math.floor(Math.random() * Math.min(6, matches.length))];
+                        await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes de buena calidad.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No encontré imágenes en Pinterest para esa búsqueda.' }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { text: `❌ Error interno al buscar la imagen: ${e.message}` }, { quoted: msg }); }
+                } catch (e) { 
+                    await sock.sendMessage(from, { text: `❌ Error al buscar en Pinterest: ${e.message}` }, { quoted: msg }); 
+                }
                 return;
             }
 
