@@ -214,7 +214,7 @@ if (command === '/ruleta') {
             }
 
 
-            // 🧠 GOOGLE (Gemini - Con API restaurada y capturador de errores)
+             // 🧠 GOOGLE (Gemini - Versión 3.1 Flash-Lite)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -224,9 +224,12 @@ if (command === '/ruleta') {
                 }
 
                 try {
-                    // Tu API KEY exacta devuelta al código
+                    // Tu API KEY intacta
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                    
+                    // CAMBIO: Apuntamos al modelo estable 3.1 Flash-Lite
+                    // (Si preferís probar la 2.5, podés cambiarlo por gemini-2.5-flash)
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiApiKey}`;
                     
                     const res = await fetch(url, {
                         method: 'POST',
@@ -251,7 +254,7 @@ if (command === '/ruleta') {
                 }
                 return;
             }
-
+ 
             // 👽 REDDIT (Con User-Agent robusto)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg }); return; }
