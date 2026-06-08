@@ -53,7 +53,7 @@ function saveBannedUsers(list) {
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     let version = [2, 3000, 1017551063]; 
-    
+
     try {
         const latest = await fetchLatestBaileysVersion();
         version = latest.version;
@@ -129,11 +129,12 @@ async function connectToWhatsApp() {
 
             const parts = text.split(' ');
             const command = parts[0].toLowerCase();
+            const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
 
             const isAdmin = ADMINS.includes(sender);
             const bannedList = getBannedUsers();
-            
+
             if (bannedList.includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
 
@@ -146,12 +147,12 @@ async function connectToWhatsApp() {
                 if (command === '/+18off') { nsfwEnabled = false; await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); return; }
                 if (command === '/modotrucadoon') { modoTrucado = true; await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); return; }
                 if (command === '/modotrucadooff') { modoTrucado = false; await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); return; }
-                
+
                 if (command === '/ban' || command === '/unban') {
                     const target = msg.message.extendedTextMessage?.contextInfo?.participant;
                     if (!target) { await sock.sendMessage(from, { text: '⚠️ Debes citar un mensaje.' }, { quoted: msg }); return; }
                     if (command === '/ban' && ADMINS.includes(target)) { await sock.sendMessage(from, { text: '❌ No puedes banear a un admin.' }, { quoted: msg }); return; }
-                    
+
                     let list = getBannedUsers();
                     if (command === '/ban' && !list.includes(target)) {
                         list.push(target);
@@ -167,85 +168,84 @@ async function connectToWhatsApp() {
 
             // --- COMANDOS PÚBLICOS ---
 
-            // 🎲 RULETA (Corregida con Randomizer y Probabilidades)
-if (command === '/ruleta') {
+            // 🎲 RULETA (Formato e intensión corregidos)
+            if (command === '/ruleta') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Hacé una pregunta. Podés agregar la probabilidad al final (ej: `/ruleta apruebo? 1;10`).' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Escribí algo para la ruleta. Ejemplo: `/ruleta ¿Va a llover? 1;100`' }, { quoted: msg });
                     return;
                 }
 
-                const match = args.match(/(\d+);(\d+)\s*$/);
-                let siChance = 1;
-                let totalChance = 2; 
+                let resultadoFinal = "";
+                let probabilidadMostrada = "";
                 let pregunta = args;
 
-                if (match) {
-                    siChance = parseInt(match[1]);
-                    totalChance = parseInt(match[2]);
-                    pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
+                const probMatch = args.match(/(\d+);(\d+)\s*$/);
+                let siChance = 1;
+                let totalChance = 2;
+                let tieneProbabilidad = false;
 
-                    if (siChance > totalChance || siChance <= 0 || totalChance <= 0) {
-                        await sock.sendMessage(from, { text: '⚠️ Probabilidades inválidas. El formato correcto es `1;10`.' }, { quoted: msg });
-                        return;
+                if (probMatch) {
+                    siChance = parseInt(probMatch[1]);
+                    totalChance = parseInt(probMatch[2]);
+                    pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
+                    probabilidadMostrada = ` (Probabilidad: ${siChance};${totalChance})`;
+                    tieneProbabilidad = true;
+                }
+
+                let esTrucado = false;
+                if (modoTrucado) {
+                    const textoBajo = pregunta.toLowerCase();
+                    if (((textoBajo.includes('maxi') || textoBajo.includes('máximo')) && textoBajo.includes('femboy')) ||
+                        (textoBajo.includes('dylan') && textoBajo.includes('perra')) ||
+                        (textoBajo.includes('omeguita'))) {
+                        resultadoFinal = "🔴 si";
+                        esTrucado = true;
                     }
                 }
 
-                const checkMsg = pregunta.toLowerCase();
-                let resultado = '';
-
-                // 🔥 LÓGICA DEL MODO TRUCADO (Frases forzadas a salir SIEMPRE SÍ)
-                const isRiggedQuestion = (
-                    (checkMsg.includes('maxi') && checkMsg.includes('femboy')) ||
-                    (checkMsg.includes('dylan') && checkMsg.includes('perra')) ||
-                    (checkMsg.includes('omeguita'))
-                );
-
-                if (modoTrucado && isRiggedQuestion) {
-                    // Ignora el azar por completo
-                    resultado = '🔴 SÍ';
-                } else {
-                    // Cálculo aleatorio normal
-                    const random = Math.floor(Math.random() * totalChance) + 1;
-                    resultado = random <= siChance ? '🔴 SÍ' : '⚫ NO';
+                if (!esTrucado) {
+                    if (tieneProbabilidad) {
+                        const rand = Math.floor(Math.random() * totalChance) + 1;
+                        resultadoFinal = (rand <= siChance) ? "🔴 si" : "⚫ no";
+                    } else {
+                        const respuestas = ["🔴 si", "⚫ no"];
+                        resultadoFinal = respuestas[Math.floor(Math.random() * respuestas.length)];
+                    }
                 }
 
-                await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultado}* (Probabilidad: ${siChance} de ${totalChance})` }, { quoted: msg });
+                const mensajeRespuesta = `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}`;
+                await sock.sendMessage(from, { text: mensajeRespuesta }, { quoted: msg });
                 return;
             }
 
-
-             // 🧠 GOOGLE (Gemini - Versión 3.1 Flash-Lite)
+            // 🧠 GOOGLE (Gemini 3.5 Flash - Con prefijo solicitado)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
                 if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-                    await sock.sendMessage(from, { text: '🤖 *IA:*\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠・⁠▼\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
 
                 try {
-                    // Tu API KEY intacta
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    
-                    // CAMBIO: Apuntamos al modelo estable 3.1 Flash-Lite
-                    // (Si preferís probar la 2.5, podés cambiarlo por gemini-2.5-flash)
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiApiKey}`;
-                    
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiApiKey}`;
+
                     const res = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
                     });
-                    
+
                     const json = await res.json();
-                    
+
                     if (json.error) {
                         await sock.sendMessage(from, { text: `❌ Google rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
                         return;
                     }
 
                     if (json.candidates) {
-                        await sock.sendMessage(from, { text: `🔴⚫:*\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠・⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
                     }
@@ -254,24 +254,60 @@ if (command === '/ruleta') {
                 }
                 return;
             }
- 
-            // 👽 REDDIT (Espejo PullPush anti-bloqueos)
+
+            // 🌟 GOOGLE PRO (Fijo en Gemini 3.1 Pro)
+            if (command === '/googlep') {
+                if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
+
+                if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
+                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠・⁠▼\n\n✨ Analizando mis bases de datos avanzadas: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
+                    return;
+                }
+
+                try {
+                    const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key=${geminiApiKey}`;
+
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
+                    });
+
+                    const json = await res.json();
+
+                    if (json.error) {
+                        await sock.sendMessage(from, { text: `❌ Google PRO rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
+                        return;
+                    }
+
+                    if (json.candidates) {
+                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠・⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                    } else {
+                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta en la versión PRO.' }, { quoted: msg });
+                    }
+                } catch (e) { 
+                    await sock.sendMessage(from, { text: `❌ Fallo en fetch PRO: ${e.message}` }, { quoted: msg }); 
+                }
+                return;
+            }
+
+            // 👽 REDDIT (API Espejo PullPush Anti-Bloqueos de Render)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
-                const isNsfwCommand = text.startsWith('/reddIt');
+                const isNsfwCommand = originalCommand === '/reddIt';
 
                 if (isNsfwCommand && !nsfwEnabled) {
                     await sock.sendMessage(from, { text: '🔞 *Denegado.* Requiere `/+18on`.' }, { quoted: msg }); return;
                 }
 
                 try {
-                    // Usamos PullPush para saltarnos el bloqueo de IP de Reddit a servidores cloud
                     let url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(args)}&size=50`;
-                    
+
                     const res = await fetch(url, {
                         headers: { 'User-Agent': 'Mozilla/5.0' }
                     });
-                    
+
                     if (!res.ok) {
                         await sock.sendMessage(from, { text: `❌ El servidor espejo de Reddit no respondió (Código ${res.status}).` }, { quoted: msg }); return;
                     }
@@ -279,19 +315,16 @@ if (command === '/ruleta') {
                     const json = await res.json();
                     let posts = json?.data || [];
 
-                    // Filtrado estricto +18 o Seguro
                     posts = isNsfwCommand 
                         ? posts.filter(p => p.over_18)
                         : posts.filter(p => !p.over_18);
 
                     if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
 
-                    // Agarra un post aleatorio de la lista
                     const post = posts[Math.floor(Math.random() * Math.min(10, posts.length))];
                     const permalink = post.permalink ? `https://reddit.com${post.permalink}` : `https://reddit.com/r/${post.subreddit}`;
                     const suffix = `\n\nSubreddit: r/${post.subreddit || 'unknown'}\nLink: ${permalink}`;
 
-                    // Detecta si el post contiene link de imagen directo
                     const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
 
                     if (tieneImagen) {
@@ -305,30 +338,28 @@ if (command === '/ruleta') {
                 }
                 return;
             }
-             // 📌 PIN (Buscador directo de Pinterest)
+
+            // 📌 PIN (Pinterest Directo sin intermediarios)
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
                     const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
                     const response = await fetch(url, { 
                         headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
                         } 
                     });
-                    
+
                     if (!response.ok) {
                         await sock.sendMessage(from, { text: '❌ Pinterest no respondió correctamente.' }, { quoted: msg });
                         return;
                     }
 
                     const html = await response.text();
-                    
-                    // Filtramos las imágenes del entramado de Pinterest (calidad 736x)
                     let matches = [...html.matchAll(/https:\/\/i\.pinimg\.com\/736x\/[^"'\s>]+/gi)].map(m => m[0]);
-                    matches = [...new Set(matches)]; // Borramos duplicados
+                    matches = [...new Set(matches)]; 
 
                     if (matches.length > 0) {
-                        // Elegimos una imagen al azar de las primeras 6 que encontró
                         const imgUrl = matches[Math.floor(Math.random() * Math.min(6, matches.length))];
                         await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
                     } else {
@@ -340,7 +371,7 @@ if (command === '/ruleta') {
                 return;
             }
 
-            // 🎵 LETRAS (Sin tiempos)
+            // 🎵 LETRAS (LrcLib Limpio)
             if (command === '/letras' || command === '/letra') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Ejemplo: `/letra Roberto - Cuarteto de Nos`' }, { quoted: msg }); return; }
                 try {
@@ -349,7 +380,7 @@ if (command === '/ruleta') {
                         const [cancion, artista] = args.split('-').map(str => str.trim());
                         let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cancion)}&artist_name=${encodeURIComponent(artista)}`);
                         if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
-                        
+
                         if (!data.length) {
                             res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cancion + ' ' + artista)}`);
                             if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
@@ -358,11 +389,10 @@ if (command === '/ruleta') {
                         const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
                         if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
                     }
-                    
+
                     if (!data.length) { await sock.sendMessage(from, { text: `❌ No encontré la canción.` }, { quoted: msg }); return; }
-                    
+
                     const track = data[0];
-                    
                     let lyrics = track.plainLyrics;
                     if (!lyrics && track.syncedLyrics) {
                         lyrics = track.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
