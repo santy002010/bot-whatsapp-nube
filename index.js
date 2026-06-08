@@ -407,4 +407,14 @@ async function connectToWhatsApp() {
                     } else {
                         await sock.sendMessage(from, { text: `❌ La canción no tiene la letra guardada.` }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { 
+                } catch (e) { await sock.sendMessage(from, { text: '❌ Error al buscar la letra.' }, { quoted: msg }); }
+                return;
+            }
+
+        } catch (globalError) {
+            console.error("Error global:", globalError);
+        }
+    });
+}
+
+connectToWhatsApp();
