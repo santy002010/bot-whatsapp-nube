@@ -218,7 +218,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🧠 GOOGLE (Gemini 1.5 Flash - Identificador oficial de API)
+            // 🧠 GOOGLE (Gemini 2.0 Flash)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -229,7 +229,7 @@ async function connectToWhatsApp() {
 
                 try {
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
 
                     const res = await fetch(url, {
                         method: 'POST',
@@ -244,7 +244,7 @@ async function connectToWhatsApp() {
                         return;
                     }
 
-                    if (json.candidates) {
+                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
                         await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠・⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
@@ -255,7 +255,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🌟 GOOGLE PRO (Gemini 1.5 Pro - Identificador oficial de API)
+            // 🌟 GOOGLE PRO (Gemini 2.0 Pro)
             if (command === '/googlep') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
 
@@ -266,7 +266,7 @@ async function connectToWhatsApp() {
 
                 try {
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${geminiApiKey}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-pro-exp:generateContent?key=${geminiApiKey}`;
 
                     const res = await fetch(url, {
                         method: 'POST',
@@ -281,7 +281,7 @@ async function connectToWhatsApp() {
                         return;
                     }
 
-                    if (json.candidates) {
+                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
                         await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠・⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta en la versión PRO.' }, { quoted: msg });
@@ -292,7 +292,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 👽 REDDIT (Ruta limpia para evitar 404 en PullPush)
+            // 👽 REDDIT (API Nativa Pública de Reddit)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
                 const isNsfwCommand = originalCommand === '/reddIt';
@@ -302,18 +302,19 @@ async function connectToWhatsApp() {
                 }
 
                 try {
-                    let url = `https://api.pullpush.io/reddit/search/submission?q=${encodeURIComponent(args)}&size=50`;
+                    let url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=30`;
 
                     const res = await fetch(url, {
-                        headers: { 'User-Agent': 'Mozilla/5.0' }
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                     });
 
                     if (!res.ok) {
-                        await sock.sendMessage(from, { text: `❌ El servidor espejo de Reddit no respondió (Código ${res.status}).` }, { quoted: msg }); return;
+                        await sock.sendMessage(from, { text: `❌ Reddit no respondió correctamente (Código ${res.status}).` }, { quoted: msg }); return;
                     }
 
                     const json = await res.json();
-                    let posts = json?.data || [];
+                    let children = json?.data?.children || [];
+                    let posts = children.map(child => child.data);
 
                     posts = isNsfwCommand 
                         ? posts.filter(p => p.over_18)
@@ -321,32 +322,32 @@ async function connectToWhatsApp() {
 
                     if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
 
-                    const post = posts[Math.floor(Math.random() * Math.min(10, posts.length))];
-                    const permalink = post.permalink ? `https://reddit.com${post.permalink}` : `https://reddit.com/r/${post.subreddit}`;
-                    const suffix = `\n\nSubreddit: r/${post.subreddit || 'unknown'}\nLink: ${permalink}`;
+                    const post = posts[Math.floor(Math.random() * Math.min(12, posts.length))];
+                    const permalink = `https://reddit.com${post.permalink}`;
+                    const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: ${permalink}`;
 
                     const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
 
                     if (tieneImagen) {
                         await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
                     } else {
-                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 600)}...` : '';
+                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '';
                         await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
                     }
                 } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Error de red con Reddit: ${e.message}` }, { quoted: msg }); 
+                    await sock.sendMessage(from, { text: `❌ Error de conexión con Reddit: ${e.message}` }, { quoted: msg }); 
                 }
                 return;
             }
 
-            // 📌 PIN (Filtro anti-escapes para JSON interno de Pinterest)
+            // 📌 PIN (Filtro Robusto de Imágenes Reales)
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
                     const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
                     const response = await fetch(url, { 
                         headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
                         }
                     });
 
@@ -356,11 +357,14 @@ async function connectToWhatsApp() {
                     }
 
                     const html = await response.text();
-                    let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/736x\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
+                    let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
+                    
+                    // Nos aseguramos de agarrar las del feed (que suelen tener resoluciones como 736x o 474x)
+                    matches = matches.filter(link => link.includes('/736x/') || link.includes('/474x/') || link.includes('/originals/'));
                     matches = [...new Set(matches)]; 
 
                     if (matches.length > 0) {
-                        const imgUrl = matches[Math.floor(Math.random() * Math.min(6, matches.length))];
+                        const imgUrl = matches[Math.floor(Math.random() * Math.min(8, matches.length))];
                         await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No encontré imágenes en Pinterest para esa búsqueda.' }, { quoted: msg });
@@ -403,14 +407,4 @@ async function connectToWhatsApp() {
                     } else {
                         await sock.sendMessage(from, { text: `❌ La canción no tiene la letra guardada.` }, { quoted: msg });
                     }
-                } catch (e) { await sock.sendMessage(from, { text: '❌ Error al buscar la letra.' }, { quoted: msg }); }
-                return;
-            }
-
-        } catch (globalError) {
-            console.error("Error global:", globalError);
-        }
-    });
-}
-
-connectToWhatsApp();
+                } catch (e) { await sock.sendMessage(from, { 
