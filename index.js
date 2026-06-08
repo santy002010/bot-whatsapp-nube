@@ -168,7 +168,7 @@ async function connectToWhatsApp() {
 
             // --- COMANDOS PÚBLICOS ---
 
-            // 🎲 RULETA (Formato e intensión corregidos)
+            // 🎲 RULETA
             if (command === '/ruleta') {
                 if (!args) {
                     await sock.sendMessage(from, { text: '⚠️ Escribí algo para la ruleta. Ejemplo: `/ruleta ¿Va a llover? 1;100`' }, { quoted: msg });
@@ -218,7 +218,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🧠 GOOGLE (Gemini 3.5 Flash - Con prefijo solicitado)
+            // 🧠 GOOGLE (Gemini 1.5 Flash - Identificador oficial de API)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -229,7 +229,7 @@ async function connectToWhatsApp() {
 
                 try {
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${geminiApiKey}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
 
                     const res = await fetch(url, {
                         method: 'POST',
@@ -255,7 +255,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🌟 GOOGLE PRO (Fijo en Gemini 3.1 Pro)
+            // 🌟 GOOGLE PRO (Gemini 1.5 Pro - Identificador oficial de API)
             if (command === '/googlep') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
 
@@ -266,7 +266,7 @@ async function connectToWhatsApp() {
 
                 try {
                     const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key=${geminiApiKey}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${geminiApiKey}`;
 
                     const res = await fetch(url, {
                         method: 'POST',
@@ -292,7 +292,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 👽 REDDIT (API Espejo PullPush Anti-Bloqueos de Render)
+            // 👽 REDDIT (Ruta limpia para evitar 404 en PullPush)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
                 const isNsfwCommand = originalCommand === '/reddIt';
@@ -302,7 +302,7 @@ async function connectToWhatsApp() {
                 }
 
                 try {
-                    let url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(args)}&size=50`;
+                    let url = `https://api.pullpush.io/reddit/search/submission?q=${encodeURIComponent(args)}&size=50`;
 
                     const res = await fetch(url, {
                         headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -339,7 +339,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 📌 PIN (Pinterest Directo sin intermediarios)
+            // 📌 PIN (Filtro anti-escapes para JSON interno de Pinterest)
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
@@ -347,7 +347,7 @@ async function connectToWhatsApp() {
                     const response = await fetch(url, { 
                         headers: { 
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-                        } 
+                        }
                     });
 
                     if (!response.ok) {
@@ -356,7 +356,7 @@ async function connectToWhatsApp() {
                     }
 
                     const html = await response.text();
-                    let matches = [...html.matchAll(/https:\/\/i\.pinimg\.com\/736x\/[^"'\s>]+/gi)].map(m => m[0]);
+                    let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/736x\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
                     matches = [...new Set(matches)]; 
 
                     if (matches.length > 0) {
@@ -371,7 +371,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🎵 LETRAS (LrcLib Limpio)
+            // 🎵 LETRAS
             if (command === '/letras' || command === '/letra') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Ejemplo: `/letra Roberto - Cuarteto de Nos`' }, { quoted: msg }); return; }
                 try {
