@@ -224,13 +224,12 @@ if (!sock.authState.creds.registered) {
                 return;
             }
 
+        //         // ==========================================
+        // CONFIGURACIÓN DE APIS (Usa la variable de entorno de Render)
         // ==========================================
-        // CONFIGURACIÓN DE APIS (Poné tu clave acá)
-        // ==========================================
-// Ahora la clave se lee de forma segura desde los ajustes de Render
-const MI_GEMINI_KEY = process.env.GEMINI_KEY; 
+        const MI_GEMINI_KEY = process.env.GEMINI_KEY; 
 
-        // 🧠 GOOGLE (Gemini 1.5 o 2.0 Flash - Usando tu propia Key)
+        // 🧠 GOOGLE (Gemini 2.0 Flash - ¡CORREGIDO!)
         if (command === '/google') {
             if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -240,8 +239,8 @@ const MI_GEMINI_KEY = process.env.GEMINI_KEY;
             }
 
             try {
-                // Usamos gemini-1.5-flash por estabilidad, podés cambiarlo por gemini-2.0-flash si tenés habilitado el modelo en tu consola
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${MI_GEMINI_KEY}`;
+                // Volvemos al modelo 2.0 que sí está activo
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${MI_GEMINI_KEY}`;
 
                 const res = await fetch(url, {
                     method: 'POST',
@@ -252,7 +251,7 @@ const MI_GEMINI_KEY = process.env.GEMINI_KEY;
                 const json = await res.json();
 
                 if (json.error) {
-                    await sock.sendMessage(from, { text: `❌ error de cuota/API:\n${json.error.message}\n\n💡 Tip: Si dice "quota exceeded", necesitás cambiar la API Key en el código por una tuya privada.` }, { quoted: msg });
+                    await sock.sendMessage(from, { text: `❌ Error de Google:\n${json.error.message}\n\n💡 Tip: Si dice "quota exceeded", revisá que la clave que pusiste en el Environment de Render sea tuya y esté bien copiada.` }, { quoted: msg });
                     return;
                 }
 
@@ -267,7 +266,7 @@ const MI_GEMINI_KEY = process.env.GEMINI_KEY;
             return;
         }
 
-        // 🌟 GOOGLE PRO (Gemini 1.5 Pro)
+        // 🌟 GOOGLE PRO (Gemini 2.5 Pro - ¡CORREGIDO!)
         if (command === '/googlep') {
             if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
 
@@ -277,7 +276,8 @@ const MI_GEMINI_KEY = process.env.GEMINI_KEY;
             }
 
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${MI_GEMINI_KEY}`;
+                // Volvemos al modelo experimental avanzado 2.5
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:generateContent?key=${MI_GEMINI_KEY}`;
 
                 const res = await fetch(url, {
                     method: 'POST',
@@ -302,6 +302,7 @@ const MI_GEMINI_KEY = process.env.GEMINI_KEY;
             }
             return;
         }
+
 
         // 👽 REDDIT (User-Agent modificado para evitar el baneo de Render)
         if (command === '/reddit') {
