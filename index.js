@@ -224,12 +224,12 @@ if (!sock.authState.creds.registered) {
                 return;
             }
 
-        //         // ==========================================
+        //         //         // ==========================================
         // CONFIGURACIÓN DE APIS (Usa la variable de entorno de Render)
         // ==========================================
         const MI_GEMINI_KEY = process.env.GEMINI_KEY; 
 
-        // 🧠 GOOGLE (Gemini 2.0 Flash - ¡CORREGIDO!)
+        // 🧠 GOOGLE (¡Actualizado a Gemini 3.5 Flash!)
         if (command === '/google') {
             if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
@@ -239,8 +239,8 @@ if (!sock.authState.creds.registered) {
             }
 
             try {
-                // Volvemos al modelo 2.0 que sí está activo
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${MI_GEMINI_KEY}`;
+                // Apuntamos al modelo 3.5 Flash que ves en tu captura
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${MI_GEMINI_KEY}`;
 
                 const res = await fetch(url, {
                     method: 'POST',
@@ -251,7 +251,7 @@ if (!sock.authState.creds.registered) {
                 const json = await res.json();
 
                 if (json.error) {
-                    await sock.sendMessage(from, { text: `❌ Error de Google:\n${json.error.message}\n\n💡 Tip: Si dice "quota exceeded", revisá que la clave que pusiste en el Environment de Render sea tuya y esté bien copiada.` }, { quoted: msg });
+                    await sock.sendMessage(from, { text: `❌ Error de Google API:\n${json.error.message}\n\n💡 Tip: Si persiste, revisá en los logs de Render qué código de error tira.` }, { quoted: msg });
                     return;
                 }
 
@@ -266,7 +266,7 @@ if (!sock.authState.creds.registered) {
             return;
         }
 
-        // 🌟 GOOGLE PRO (Gemini 2.5 Pro - ¡CORREGIDO!)
+        // 🌟 GOOGLE PRO (¡Actualizado a Gemini 3.1 Pro!)
         if (command === '/googlep') {
             if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
 
@@ -276,8 +276,8 @@ if (!sock.authState.creds.registered) {
             }
 
             try {
-                // Volvemos al modelo experimental avanzado 2.5
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:generateContent?key=${MI_GEMINI_KEY}`;
+                // Apuntamos al modelo 3.1 Pro de tu captura
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${MI_GEMINI_KEY}`;
 
                 const res = await fetch(url, {
                     method: 'POST',
@@ -302,7 +302,6 @@ if (!sock.authState.creds.registered) {
             }
             return;
         }
-
 
         // 👽 REDDIT (User-Agent modificado para evitar el baneo de Render)
         if (command === '/reddit') {
