@@ -82,20 +82,38 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-if (!sock.authState.creds.registered) {
+// 1. PONÉ ESTA VARIABLE AFUERA O JUSTO ARRIBA DEL EVENTO DE CONEXIÓN
+let codigoSolicitado = false;
+
+// 2. ADENTRO DE sock.ev.on('connection.update', ...) REEMPLAZÁ LA VINCULACIÓN POR ESTA:
+if (!sock.authState.creds.registered && !codigoSolicitado) {
+    codigoSolicitado = true; // Cerramos el candado inmediatamente para que no se repita
+
     setTimeout(async () => {
         try {
-            console.log(`[VINCULACIÓN] Solicitando código para el número: ${HOST_NUMBER}`);
-            let code = await sock.requestPairingCode(HOST_NUMBER);
+            // Nos aseguramos de que el número no tenga espacios, guiones ni el signo "+"
+            const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
+            console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
+            
+            let code = await sock.requestPairingCode(numeroLimpio);
             code = code?.match(/.{1,4}/g)?.join('-') || code;
+            
             console.log(`\n====================================`);
-            console.log(`🔥 CÓDIGO DE VINCULACIÓN: ${code} 🔥`);
+            console.log(`🔥 TU CÓDIGO DE VINCULACIÓN: ${code.toUpperCase()} 🔥`);
             console.log(`====================================\n`);
         } catch (err) {
-            console.error(`❌ Error crítico al solicitar el código de vinculación:`, err.message);
+            console.error(`❌ Error al generar el código de vinculación:`, err.message);
+            codigoSolicitado = false; // Si explota por algo, abrimos el candado para reintentar
         }
-    }, 4000); 
+    }, 6000); // Le damos 6 segundos al bot para que estabilice la conexión antes de pedir el código
 }
+
+// 3. EN LA PARTE DONDE CORTE LA CONEXIÓN (connection === 'close'), ACORDATE DE RESETEARLO:
+if (connection === 'close') {
+    codigoSolicitado = false; // Reseteamos el candado si el bot se apaga o se cae
+    // ... acá va tu lógica existente para reiniciar el bot ...
+}
+
 
  
     sock.ev.on('connection.update', async (update) => {
