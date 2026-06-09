@@ -96,6 +96,7 @@ if (!sock.authState.creds.registered) {
         }
     }, 4000); 
 }
+
  
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
