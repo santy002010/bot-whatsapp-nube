@@ -82,31 +82,57 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-// 1. PONÉ ESTA VARIABLE AFUERA O JUSTO ARRIBA DEL EVENTO DE CONEXIÓN
-let codigoSolicitado = false;
+// 1. ACORDATE: Esta variable va arriba de todo, AFUERA de la función de conectar
+let codigoSolicitado = false; 
 
-// 2. ADENTRO DE sock.ev.on('connection.update', ...) REEMPLAZÁ LA VINCULACIÓN POR ESTA:
-if (!sock.authState.creds.registered && !codigoSolicitado) {
-    codigoSolicitado = true; // Cerramos el candado inmediatamente para que no se repita
 
-    setTimeout(async () => {
-        try {
-            // Nos aseguramos de que el número no tenga espacios, guiones ni el signo "+"
-            const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
-            console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
-            
-            let code = await sock.requestPairingCode(numeroLimpio);
-            code = code?.match(/.{1,4}/g)?.join('-') || code;
-            
-            console.log(`\n====================================`);
-            console.log(`🔥 TU CÓDIGO DE VINCULACIÓN: ${code.toUpperCase()} 🔥`);
-            console.log(`====================================\n`);
-        } catch (err) {
-            console.error(`❌ Error al generar el código de vinculación:`, err.message);
-            codigoSolicitado = false; // Si explota por algo, abrimos el candado para reintentar
+// 2. REEMPLAZÁ TU BLOQUE DE 'connection.update' COMPLETO POR ESTE:
+sock.ev.on('connection.update', async (update) => {
+    // Es desde acá adentro de donde nace la variable "connection"
+    const { connection, lastDisconnect } = update; 
+
+    // ✅ EL RESETEO VA ACÁ ADENTRO (Donde la variable sí existe)
+    if (connection === 'close') {
+        codigoSolicitado = false; // Limpiamos el candado para que pueda volver a pedir código si se cae
+        console.log('[SISTEMA] Conexión cerrada. Intentando reconectar...');
+        
+        // Dejá acá abajo tu lógica vieja de reconexión, por ejemplo:
+        const buscarError = lastDisconnect?.error?.output?.statusCode;
+        if (buscarError !== 401) { // 401 es Logged Out (Sesión cerrada en el cel)
+            connectToWhatsApp();
         }
-    }, 6000); // Le damos 6 segundos al bot para que estabilice la conexión antes de pedir el código
-}
+        return;
+    }
+
+    if (connection === 'open') {
+        console.log('[SISTEMA] ¡Bot conectado con éxito a WhatsApp!');
+        codigoSolicitado = false;
+        return;
+    }
+
+    // 🔒 EL BLOQUE DEL CÓDIGO DE VINCULACIÓN (Queda protegido acá también)
+    if (!sock.authState.creds.registered && !codigoSolicitado) {
+        codigoSolicitado = true; // Cerramos el candado para evitar códigos duplicados
+
+        setTimeout(async () => {
+            try {
+                const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
+                console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
+                
+                let code = await sock.requestPairingCode(numeroLimpio);
+                code = code?.match(/.{1,4}/g)?.join('-') || code;
+                
+                console.log(`\n====================================`);
+                console.log(`🔥 TU CÓDIGO DE VINCULACIÓN: ${code.toUpperCase()} 🔥`);
+                console.log(`====================================\n`);
+            } catch (err) {
+                console.error(`❌ Error al generar el código de vinculación:`, err.message);
+                codigoSolicitado = false; // Si falla, abrimos el candado para reintentar
+            }
+        }, 6000); // Espera estratégica de 6 segundos
+    }
+});
+
 
 // 3. EN LA PARTE DONDE CORTE LA CONEXIÓN (connection === 'close'), ACORDATE DE RESETEARLO:
 if (connection === 'close') {
