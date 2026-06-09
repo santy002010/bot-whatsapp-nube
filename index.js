@@ -224,161 +224,171 @@ if (!sock.authState.creds.registered) {
                 return;
             }
 
-            // 🧠 GOOGLE (Gemini 2.0 Flash)
-            if (command === '/google') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
+        // ==========================================
+        // CONFIGURACIÓN DE APIS (Poné tu clave acá)
+        // ==========================================
+// Ahora la clave se lee de forma segura desde los ajustes de Render
+const MI_GEMINI_KEY = process.env.GEMINI_KEY; 
 
-                if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠・⁠▼\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
+        // 🧠 GOOGLE (Gemini 1.5 o 2.0 Flash - Usando tu propia Key)
+        if (command === '/google') {
+            if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
+
+            if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
+                await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
+                return;
+            }
+
+            try {
+                // Usamos gemini-1.5-flash por estabilidad, podés cambiarlo por gemini-2.0-flash si tenés habilitado el modelo en tu consola
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${MI_GEMINI_KEY}`;
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
+                });
+
+                const json = await res.json();
+
+                if (json.error) {
+                    await sock.sendMessage(from, { text: `❌ error de cuota/API:\n${json.error.message}\n\n💡 Tip: Si dice "quota exceeded", necesitás cambiar la API Key en el código por una tuya privada.` }, { quoted: msg });
                     return;
                 }
 
-                try {
-                    const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
-
-                    const res = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
-                    });
-
-                    const json = await res.json();
-
-                    if (json.error) {
-                        await sock.sendMessage(from, { text: `❌ Google rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
-                        return;
-                    }
-
-                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
-                    } else {
-                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
-                    }
-                } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Fallo en fetch: ${e.message}` }, { quoted: msg }); 
+                if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+                    await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                } else {
+                    await sock.sendMessage(from, { text: '❌ No pude procesar la estructura de la respuesta.' }, { quoted: msg });
                 }
+            } catch (e) { 
+                await sock.sendMessage(from, { text: `❌ Fallo en fetch: ${e.message}` }, { quoted: msg }); 
+            }
+            return;
+        }
+
+        // 🌟 GOOGLE PRO (Gemini 1.5 Pro)
+        if (command === '/googlep') {
+            if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
+
+            if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
+                await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos avanzadas: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
                 return;
             }
 
-            // 🌟 GOOGLE PRO (Gemini 2.5 Pro)
-            if (command === '/googlep') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${MI_GEMINI_KEY}`;
 
-                if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠・⁠▼\n\n✨ Analizando mis bases de datos avanzadas: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
+                });
+
+                const json = await res.json();
+
+                if (json.error) {
+                    await sock.sendMessage(from, { text: `❌ Error en Google PRO:\n${json.error.message}` }, { quoted: msg });
                     return;
                 }
 
-                try {
-                    const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-exp-03-25:generateContent?key=${geminiApiKey}`;
-
-                    const res = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
-                    });
-
-                    const json = await res.json();
-
-                    if (json.error) {
-                        await sock.sendMessage(from, { text: `❌ Google PRO rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
-                        return;
-                    }
-
-                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
-                    } else {
-                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta en la versión PRO.' }, { quoted: msg });
-                    }
-                } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Fallo en fetch PRO: ${e.message}` }, { quoted: msg }); 
+                if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
+                    await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                } else {
+                    await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta en la versión PRO.' }, { quoted: msg });
                 }
-                return;
+            } catch (e) { 
+                await sock.sendMessage(from, { text: `❌ Fallo en fetch PRO: ${e.message}` }, { quoted: msg }); 
+            }
+            return;
+        }
+
+        // 👽 REDDIT (User-Agent modificado para evitar el baneo de Render)
+        if (command === '/reddit') {
+            if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
+            const isNsfwCommand = originalCommand === '/reddIt';
+
+            if (isNsfwCommand && !nsfwEnabled) {
+                await sock.sendMessage(from, { text: '🔞 *Denegado.* Requiere `/+18on`.' }, { quoted: msg }); return;
             }
 
-            // 👽 REDDIT (API Pública JSON)
-            if (command === '/reddit') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
-                const isNsfwCommand = originalCommand === '/reddIt';
+            try {
+                let url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
 
-                if (isNsfwCommand && !nsfwEnabled) {
-                    await sock.sendMessage(from, { text: '🔞 *Denegado.* Requiere `/+18on`.' }, { quoted: msg }); return;
+                const res = await fetch(url, {
+                    headers: { 
+                        // Usamos un identificador único de bot para que Reddit no nos meta el 403 instantáneo en Render
+                        'User-Agent': 'whatsapp:bot:instincktt-sub:v1.0.0 (by /u/instincktt_bot)'
+                    }
+                });
+
+                if (!res.ok) {
+                    await sock.sendMessage(from, { text: `❌ Reddit bloqueó el acceso (Código ${res.status}).\nMotivo: El servidor de Render está temporalmente en lista negra de la plataforma.` }, { quoted: msg }); return;
                 }
 
-                try {
-                    let url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=30&raw_json=1`;
+                const json = await res.json();
+                let children = json?.data?.children || [];
+                let posts = children.map(child => child.data);
 
-                    const res = await fetch(url, {
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                    });
+                posts = isNsfwCommand 
+                    ? posts.filter(p => p.over_18)
+                    : posts.filter(p => !p.over_18);
 
-                    if (!res.ok) {
-                        await sock.sendMessage(from, { text: `❌ Reddit no respondió correctamente (Código ${res.status}).` }, { quoted: msg }); return;
-                    }
+                if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados aptos para esa búsqueda.' }, { quoted: msg }); return; }
 
-                    const json = await res.json();
-                    let children = json?.data?.children || [];
-                    let posts = children.map(child => child.data);
+                const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
+                const permalink = `https://reddit.com${post.permalink}`;
+                const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: ${permalink}`;
 
-                    posts = isNsfwCommand 
-                        ? posts.filter(p => p.over_18)
-                        : posts.filter(p => !p.over_18);
+                const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
 
-                    if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
-
-                    const post = posts[Math.floor(Math.random() * Math.min(12, posts.length))];
-                    const permalink = `https://reddit.com${post.permalink}`;
-                    const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: ${permalink}`;
-
-                    const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
-
-                    if (tieneImagen) {
-                        await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
-                    } else {
-                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '';
-                        await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
-                    }
-                } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Error de conexión con Reddit: ${e.message}` }, { quoted: msg }); 
+                if (tieneImagen) {
+                    await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
+                } else {
+                    const body = post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '';
+                    await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
                 }
-                return;
+            } catch (e) { 
+                await sock.sendMessage(from, { text: `❌ Error de conexión con Reddit: ${e.message}` }, { quoted: msg }); 
             }
+            return;
+        }
 
-            // 📌 PIN (Scrapeo de Feed Estable)
-            if (command === '/pin') {
-                if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
-                try {
-                    const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
-                    const response = await fetch(url, { 
-                        headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                        }
-                    });
-
-                    if (!response.ok) {
-                        await sock.sendMessage(from, { text: '❌ Pinterest no respondió correctamente.' }, { network: msg });
-                        return;
+        // 📌 PIN (Headers reforzados para romper el bloqueo de Cloudflare)
+        if (command === '/pin') {
+            if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
+            try {
+                const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
+                const response = await fetch(url, { 
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'es-ES,es;q=0.8,en;q=0.5'
                     }
+                });
 
-                    const html = await response.text();
-                    let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
-                    
-                    matches = matches.filter(link => link.includes('/736x/') || link.includes('/474x/') || link.includes('/originals/'));
-                    matches = [...new Set(matches)]; 
-
-                    if (matches.length > 0) {
-                        const imgUrl = matches[Math.floor(Math.random() * Math.min(8, matches.length))];
-                        await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
-                    } else {
-                        await sock.sendMessage(from, { text: '❌ No encontré imágenes en Pinterest para esa búsqueda.' }, { quoted: msg });
-                    }
-                } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Error al buscar en Pinterest: ${e.message}` }, { quoted: msg }); 
+                if (!response.ok) {
+                    await sock.sendMessage(from, { text: `❌ Pinterest rechazó la consulta (Código ${response.status}).\nMotivo: Seguridad de Cloudflare activa en el hosting.` }, { quoted: msg });
+                    return;
                 }
-                return;
+
+                const html = await response.text();
+                let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
+                
+                matches = matches.filter(link => link.includes('/736x/') || link.includes('/474x/') || link.includes('/originals/'));
+                matches = [...new Set(matches)]; 
+
+                if (matches.length > 0) {
+                    const imgUrl = matches[Math.floor(Math.random() * Math.min(10, matches.length))];
+                    await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
+                } else {
+                    await sock.sendMessage(from, { text: '❌ No se encontraron imágenes legibles para esa búsqueda.' }, { quoted: msg });
+                }
+            } catch (e) { 
+                await sock.sendMessage(from, { text: `❌ Error al buscar en Pinterest: ${e.message}` }, { quoted: msg }); 
             }
+            return;
+        }
 
             // 🎵 LETRAS (API lrclib)
             if (command === '/letras' || command === '/letra') {
