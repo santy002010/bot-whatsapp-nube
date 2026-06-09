@@ -82,16 +82,21 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-    if (!sock.authState.creds.registered) {
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(HOST_NUMBER);
-                code = code?.match(/.{1,4}/g)?.join('-') || code;
-                console.log(`\nCÓDIGO DE VINCULACIÓN: ${code}\n`);
-            } catch (err) {}
-        }, 4000); 
-    }
-
+if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
+        try {
+            console.log(`[VINCULACIÓN] Solicitando código para el número: ${HOST_NUMBER}`);
+            let code = await sock.requestPairingCode(HOST_NUMBER);
+            code = code?.match(/.{1,4}/g)?.join('-') || code;
+            console.log(`\n====================================`);
+            console.log(`🔥 CÓDIGO DE VINCULACIÓN: ${code} 🔥`);
+            console.log(`====================================\n`);
+        } catch (err) {
+            console.error(`❌ Error crítico al solicitar el código de vinculación:`, err.message);
+        }
+    }, 4000); 
+}
+ 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
