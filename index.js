@@ -6,11 +6,12 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason, 
-    fetchLatestBaileysVersion
+    fetchLatestBaileysVersion,
+    Browsers // 🌟 IMPORTANTE: Importamos los navegadores nativos de Baileys
 } = require('@whiskeysockets/baileys');
 
 // ==========================================
-// 1. CONFIGURACIÓN DEL SERVIDOR Y ESTADO global
+// 1. CONFIGURACIÓN DEL SERVIDOR Y ESTADO
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -24,15 +25,16 @@ app.listen(PORT, () => {
 });
 
 const ALLOWED_GROUP = '120363426591951143@g.us';
-const ADMINS = ['541128394646@s.whatsapp.net', '541178972853@s.whatsapp.net'];
-const HOST_NUMBER = '541128394646';
+const ADMINS = ['5491128394646@s.whatsapp.net', '5491178972853@s.whatsapp.net'];
+const HOST_NUMBER = '5491128394646'; // 🌟 Volvemos al formato estándar con 9 para WhatsApp Normal
 
 let botEnabled = true;
 let nsfwEnabled = false;
 let modoTrucado = true;
-let codigoSolicitado = false; // Candado global único
+let codigoSolicitado = false; 
 
-const AUTH_DIR = path.join(__dirname, 'auth_session');
+// 🌟 Cambiamos a v3 para forzar a Render a borrar cualquier caché corrupta de intentos anteriores
+const AUTH_DIR = path.join(__dirname, 'auth_session_v3'); 
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
 
 if (!fs.existsSync(AUTH_DIR)) {
@@ -67,7 +69,7 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false, 
-        browser: ["Chrome (Linux)", "", ""] // Formato clave para que WhatsApp acepte la vinculación
+        browser: Browsers.ubuntu('Chrome') // 🌟 Usamos la firma oficial para evitar rechazos de WhatsApp
     });
 
     // Inyección automática del prefijo en cada mensaje saliente
@@ -83,10 +85,9 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-    // Guardado de credenciales automático
     sock.ev.on('creds.update', saveCreds);
 
-    // CONTROL DE CONEXIÓN UNIFICADO (Sin duplicados)
+    // CONTROL DE CONEXIÓN UNIFICADO
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update; 
 
@@ -96,7 +97,7 @@ async function connectToWhatsApp() {
             console.log(`[SISTEMA] Conexión cerrada (Código: ${reason}). Reconectando...`);
             
             if (reason !== DisconnectReason.loggedOut) {
-                setTimeout(() => connectToWhatsApp(), 10000); // Reconecta de forma limpia en 10 segs
+                setTimeout(() => connectToWhatsApp(), 10000); 
             }
             return;
         }
@@ -107,26 +108,26 @@ async function connectToWhatsApp() {
             return;
         }
 
-        // Bloque seguro de vinculación por código
-        if (!sock.authState.creds.registered && !codigoSolicitado) {
+        // 🌟 Solicitud de código protegida contra cierres y reinicios rápidos de Render
+        if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
             codigoSolicitado = true; 
 
             setTimeout(async () => {
                 try {
                     const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
-                    console.log(`[SISTEMA] Solicatando código seguro para: ${numeroLimpio}`);
+                    console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
                     
                     let code = await sock.requestPairingCode(numeroLimpio);
                     code = code?.match(/.{1,4}/g)?.join('-') || code;
                     
                     console.log(`\n====================================`);
-                    console.log(`🔥 TU CÓDIGO DE VINCULACIÓN: ${code.toUpperCase()} 🔥`);
+                    console.log(`🔥 TU CÓDIGO DE VINCULACIÓN ACTUAL: ${code.toUpperCase()} 🔥`);
                     console.log(`====================================\n`);
                 } catch (err) {
                     console.error(`❌ Error al generar el código de vinculación:`, err.message);
                     codigoSolicitado = false; 
                 }
-            }, 6000); 
+            }, 8000); // 8 segundos estratégicos para que el servidor de Render se estabilice del todo
         }
     });
 
@@ -359,7 +360,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 📌 PIN (Arreglado y completado)
+            // 📌 PIN 
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
