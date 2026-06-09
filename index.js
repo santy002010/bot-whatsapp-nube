@@ -24,8 +24,8 @@ app.listen(PORT, () => {
 });
 
 const ALLOWED_GROUP = '120363426591951143@g.us';
-const ADMINS = ['5491128394646@s.whatsapp.net', '5491178972853@s.whatsapp.net'];
-const HOST_NUMBER = '5491128394646';
+const ADMINS = ['541128394646@s.whatsapp.net', '541178972853@s.whatsapp.net'];
+const HOST_NUMBER = '541128394646';
 
 let botEnabled = true;
 let nsfwEnabled = false;
