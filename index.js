@@ -7,7 +7,7 @@ const {
     useMultiFileAuthState, 
     DisconnectReason, 
     fetchLatestBaileysVersion,
-    Browsers // 🌟 IMPORTANTE: Importamos los navegadores nativos de Baileys
+    Browsers // 🌟 Reparado: Importamos el manejador de navegadores oficial
 } = require('@whiskeysockets/baileys');
 
 // ==========================================
@@ -26,15 +26,14 @@ app.listen(PORT, () => {
 
 const ALLOWED_GROUP = '120363426591951143@g.us';
 const ADMINS = ['5491128394646@s.whatsapp.net', '5491178972853@s.whatsapp.net'];
-const HOST_NUMBER = '5491128394646'; // 🌟 Volvemos al formato estándar con 9 para WhatsApp Normal
+const HOST_NUMBER = '5491128394646';
 
 let botEnabled = true;
 let nsfwEnabled = false;
 let modoTrucado = true;
-let codigoSolicitado = false; 
 
-// 🌟 Cambiamos a v3 para forzar a Render a borrar cualquier caché corrupta de intentos anteriores
-const AUTH_DIR = path.join(__dirname, 'auth_session_v3'); 
+// Usamos auth_session_v4 para limpiar cualquier rastro de la sesión bugeada anterior
+const AUTH_DIR = path.join(__dirname, 'auth_session_v4');
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
 
 if (!fs.existsSync(AUTH_DIR)) {
@@ -55,7 +54,7 @@ function saveBannedUsers(list) {
 // ==========================================
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    let version = [2, 3000, 1017551063];
+    let version = [2, 3000, 1017551063]; 
 
     try {
         const latest = await fetchLatestBaileysVersion();
@@ -69,10 +68,9 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false, 
-        browser: Browsers.ubuntu('Chrome') // 🌟 Usamos la firma oficial para evitar rechazos de WhatsApp
+        browser: Browsers.ubuntu('Chrome') // 🌟 Reparado: Evita que WhatsApp te deje mudo
     });
 
-    // Inyección automática del prefijo en cada mensaje saliente
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -85,54 +83,39 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-    sock.ev.on('creds.update', saveCreds);
-
-    // CONTROL DE CONEXIÓN UNIFICADO
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update; 
-
-        if (connection === 'close') {
-            codigoSolicitado = false; 
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[SISTEMA] Conexión cerrada (Código: ${reason}). Reconectando...`);
-            
-            if (reason !== DisconnectReason.loggedOut) {
-                setTimeout(() => connectToWhatsApp(), 10000); 
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode(HOST_NUMBER);
+                code = code?.match(/.{1,4}/g)?.join('-') || code;
+                console.log(`\n====================================`);
+                console.log(`🔥 CÓDIGO DE VINCULACIÓN: ${code.toUpperCase()} 🔥`);
+                console.log(`====================================\n`);
+            } catch (err) {
+                console.error("Error al generar código:", err.message);
             }
-            return;
-        }
+        }, 5000); 
+    }
 
-        if (connection === 'open') {
-            console.log('[SISTEMA] ¡Bot conectado con éxito a WhatsApp! 🎉');
-            codigoSolicitado = false;
-            return;
-        }
-
-        // 🌟 Solicitud de código protegida contra cierres y reinicios rápidos de Render
-        if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
-            codigoSolicitado = true; 
-
-            setTimeout(async () => {
-                try {
-                    const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
-                    console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
-                    
-                    let code = await sock.requestPairingCode(numeroLimpio);
-                    code = code?.match(/.{1,4}/g)?.join('-') || code;
-                    
-                    console.log(`\n====================================`);
-                    console.log(`🔥 TU CÓDIGO DE VINCULACIÓN ACTUAL: ${code.toUpperCase()} 🔥`);
-                    console.log(`====================================\n`);
-                } catch (err) {
-                    console.error(`❌ Error al generar el código de vinculación:`, err.message);
-                    codigoSolicitado = false; 
-                }
-            }, 8000); // 8 segundos estratégicos para que el servidor de Render se estabilice del todo
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log(`[SISTEMA] Conexión cerrada por código: ${reason}. Reconectando...`);
+            if (reason === DisconnectReason.loggedOut || !sock.authState.creds.registered) {
+                setTimeout(connectToWhatsApp, 300000);
+            } else {
+                setTimeout(connectToWhatsApp, 10000);
+            }
+        } else if (connection === 'open') {
+            console.log('[SISTEMA] ¡Bot conectado y escuchando mensajes con éxito! 🎉');
         }
     });
 
+    sock.ev.on('creds.update', saveCreds);
+
     // ==========================================
-    // 3. INTERPRETACIÓN DE MENSAJES Y COMANDOS
+    // 3. INTERPRETACIÓN DE MENSAJES
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
         try {
@@ -140,9 +123,17 @@ async function connectToWhatsApp() {
             if (!msg.message || msg.key.fromMe) return;
 
             const from = msg.key.remoteJid;
-            if (from !== ALLOWED_GROUP) return;
-
+            
+            // Determinar el emisor de forma segura
             let sender = msg.key.participant || msg.key.remoteJid;
+            if (msg.key.fromMe && sock.user) {
+                sender = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+            }
+
+            const isAdmin = ADMINS.includes(sender);
+
+            // 🌟 Reparado: Si no es el grupo oficial, pero el que escribe es Admin, lo dejamos pasar para pruebas
+            if (from !== ALLOWED_GROUP && !isAdmin) return;
 
             const text = msg.message.conversation || 
                          msg.message.extendedTextMessage?.text || 
@@ -155,7 +146,6 @@ async function connectToWhatsApp() {
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
 
-            const isAdmin = ADMINS.includes(sender);
             const bannedList = getBannedUsers();
 
             if (bannedList.includes(sender) && !isAdmin) return;
@@ -191,85 +181,81 @@ async function connectToWhatsApp() {
 
             // --- COMANDOS PÚBLICOS ---
 
-            // 🎲 RULETA (Modo Trucado)
+            // 🎲 RULETA
             if (command === '/ruleta') {
                 if (!args) {
-                    await sock.sendMessage(from, { text: '⚠️ Escribí algo para la ruleta. Ejemplo: `/ruleta ¿Va a llover? 1;100`' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '⚠️ Hacé una pregunta. Podés agregar la probabilidad al final (ej: `/ruleta apruebo? 1;10`).' }, { quoted: msg });
                     return;
                 }
 
-                let resultadoFinal = "";
-                let probabilidadMostrada = "";
-                let pregunta = args;
-
-                const probMatch = args.match(/(\d+);(\d+)\s*$/);
+                const match = args.match(/(\d+);(\d+)\s*$/);
                 let siChance = 1;
-                let totalChance = 2;
-                let tieneProbabilidad = false;
+                let totalChance = 2; 
+                let pregunta = args;
+                let probText = '';
 
-                if (probMatch) {
-                    siChance = parseInt(probMatch[1]);
-                    totalChance = parseInt(probMatch[2]);
+                if (match) {
+                    siChance = parseInt(match[1]);
+                    totalChance = parseInt(match[2]);
                     pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
-                    probabilidadMostrada = ` (Probabilidad: ${siChance};${totalChance})`;
-                    tieneProbabilidad = true;
-                }
 
-                let esTrucado = false;
-                if (modoTrucado) {
-                    const textoBajo = pregunta.toLowerCase();
-                    if (((textoBajo.includes('maxi') || textoBajo.includes('máximo')) && textoBajo.includes('femboy')) ||
-                        (textoBajo.includes('dylan') && textoBajo.includes('perra')) ||
-                        (textoBajo.includes('omeguita'))) {
-                        resultadoFinal = "🔴 si";
-                        esTrucado = true;
+                    if (siChance > totalChance || siChance <= 0 || totalChance <= 0) {
+                        await sock.sendMessage(from, { text: '⚠️ Probabilidades inválidas. El formato correcto es `1;10`.' }, { quoted: msg });
+                        return;
                     }
+                    probText = ` (Probabilidad: ${siChance};${totalChance})`;
                 }
 
-                if (!esTrucado) {
-                    if (tieneProbabilidad) {
-                        const rand = Math.floor(Math.random() * totalChance) + 1;
-                        resultadoFinal = (rand <= siChance) ? "🔴 si" : "⚫ no";
-                    } else {
-                        const respuestas = ["🔴 si", "⚫ no"];
-                        resultadoFinal = respuestas[Math.floor(Math.random() * respuestas.length)];
-                    }
+                const checkMsg = pregunta.toLowerCase();
+                let resultado = '';
+
+                const isRiggedQuestion = (
+                    (checkMsg.includes('maxi') && checkMsg.includes('femboy')) ||
+                    (checkMsg.includes('dylan') && checkMsg.includes('perra')) ||
+                    (checkMsg.includes('omeguita'))
+                );
+
+                if (modoTrucado && isRiggedQuestion) {
+                    resultado = '🔴 si';
+                } else {
+                    const random = Math.floor(Math.random() * totalChance) + 1;
+                    resultado = random <= siChance ? '🔴 si' : '⚫ no';
                 }
 
-                const mensajeRespuesta = `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}`;
-                await sock.sendMessage(from, { text: mensajeRespuesta }, { quoted: msg });
+                await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultado}*${probText}` }, { quoted: msg });
                 return;
             }
 
-            const MI_GEMINI_KEY = process.env.GEMINI_KEY; 
-
-            // 🧠 GOOGLE (Gemini 1.5 Flash estable)
+            // 🧠 GOOGLE (Gemini 3.1 Flash Lite)
             if (command === '/google') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras.' }, { quoted: msg }); return; }
 
                 if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠・⁠▼\n\n✨ Analizando mis bases de datos: *Sí, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
 
                 try {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${MI_GEMINI_KEY}`;
+                    const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiApiKey}`;
+
                     const res = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
                     });
+
                     const json = await res.json();
 
                     if (json.error) {
-                        await sock.sendMessage(from, { text: `❌ Error de Google API:\n${json.error.message}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ Google rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
                         return;
                     }
 
-                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                    if (json.candidates) {
+                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠・⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No pude procesar la estructura de la respuesta.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta.' }, { quoted: msg });
                     }
                 } catch (e) { 
                     await sock.sendMessage(from, { text: `❌ Fallo en fetch: ${e.message}` }, { quoted: msg }); 
@@ -277,31 +263,34 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 🌟 GOOGLE PRO (Gemini 1.5 Pro estable)
+            // 🌟 GOOGLE PRO (Gemini 3.1 Pro)
             if (command === '/googlep') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Preguntame lo que quieras para el modelo PRO.' }, { quoted: msg }); return; }
 
                 if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos avanzadas: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
+                    await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠•⁠▼\n\n✨ Analizando mis bases de datos avanzadas: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
                     return;
                 }
 
                 try {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${MI_GEMINI_KEY}`;
+                    const geminiApiKey = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI'; 
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key=${geminiApiKey}`;
+
                     const res = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ contents: [{ parts: [{ text: args }] }] })
                     });
+
                     const json = await res.json();
 
                     if (json.error) {
-                        await sock.sendMessage(from, { text: `❌ Error en Google PRO:\n${json.error.message}` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: `❌ Google PRO rechazó la conexión.\nRazón: ${json.error.message}` }, { quoted: msg });
                         return;
                     }
 
-                    if (json.candidates && json.candidates[0]?.content?.parts?.[0]?.text) {
-                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
+                    if (json.candidates) {
+                        await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠•⁠▼\n\n${json.candidates[0].content.parts[0].text}` }, { quoted: msg });
                     } else {
                         await sock.sendMessage(from, { text: '❌ No pude procesar tu pregunta en la versión PRO.' }, { quoted: msg });
                     }
@@ -311,7 +300,7 @@ async function connectToWhatsApp() {
                 return;
             }
 
-            // 👽 REDDIT
+            // 👽 REDDIT (PullPush Espejo)
             if (command === '/reddit') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Reddit.' }, { quoted: msg }); return; }
                 const isNsfwCommand = originalCommand === '/reddIt';
@@ -321,85 +310,116 @@ async function connectToWhatsApp() {
                 }
 
                 try {
-                    let url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
+                    let url = `https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(args)}&limit=50`;
+
                     const res = await fetch(url, {
-                        headers: { 
-                            'User-Agent': 'whatsapp:bot:instincktt-sub:v1.0.0 (by /u/instincktt_bot)'
-                        }
+                        headers: { 'User-Agent': 'WhatsAppBot/1.0.0 (by BotAdmin)' }
                     });
 
                     if (!res.ok) {
-                        await sock.sendMessage(from, { text: `❌ Reddit bloqueó el acceso (Código ${res.status}).\nMotivo: El servidor de Render está temporalmente en lista negra de la plataforma.` }, { quoted: msg }); return;
+                        await sock.sendMessage(from, { text: `❌ Reddit (PullPush) rechazó la conexión (Código ${res.status}).` }, { quoted: msg }); return;
                     }
 
                     const json = await res.json();
-                    let children = json?.data?.children || [];
-                    let posts = children.map(child => child.data);
+                    let posts = json?.data || [];
 
                     posts = isNsfwCommand 
                         ? posts.filter(p => p.over_18)
                         : posts.filter(p => !p.over_18);
 
-                    if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados aptos para esa búsqueda.' }, { quoted: msg }); return; }
+                    if (!posts.length) { await sock.sendMessage(from, { text: '❌ Sin resultados para esa búsqueda.' }, { quoted: msg }); return; }
 
-                    const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
-                    const permalink = `https://reddit.com${post.permalink}`;
-                    const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: ${permalink}`;
+                    const post = posts[Math.floor(Math.random() * Math.min(10, posts.length))];
+                    const permalink = post.permalink ? `https://reddit.com${post.permalink}` : `https://reddit.com/r/${post.subreddit}`;
+                    const suffix = `\n\nSubreddit: r/${post.subreddit || 'unknown'}\nLink: ${permalink}`;
 
-                    const tieneImagen = post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg') || post.url.includes('i.redd.it'));
+                    const tieneImagen = post.url && post.url.match(/\.(jpeg|jpg|gif|png)$/i) != null;
 
                     if (tieneImagen) {
                         await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
                     } else {
-                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '';
+                        const body = post.selftext ? `\n\n${post.selftext.slice(0, 600)}...` : '';
                         await sock.sendMessage(from, { text: `🤖 *${post.title}*${body}${suffix}` }, { quoted: msg });
                     }
                 } catch (e) { 
-                    await sock.sendMessage(from, { text: `❌ Error de conexión con Reddit: ${e.message}` }, { quoted: msg }); 
+                    await sock.sendMessage(from, { text: `❌ Error de red con Reddit: ${e.message}` }, { quoted: msg }); 
                 }
                 return;
             }
 
-            // 📌 PIN 
+            // 📌 PIN
             if (command === '/pin') {
                 if (!args) { await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg }); return; }
                 try {
                     const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
                     const response = await fetch(url, { 
                         headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                            'Accept-Language': 'es-ES,es;q=0.8,en;q=0.5'
-                        }
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                            'Accept-Language': 'es-AR,es;q=0.9'
+                        } 
                     });
 
                     if (!response.ok) {
-                        await sock.sendMessage(from, { text: `❌ Pinterest rechazó la consulta (Código ${response.status}).\nMotivo: Seguridad de Cloudflare activa en el hosting.` }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ Pinterest no respondió correctamente.' }, { quoted: msg });
                         return;
                     }
 
                     const html = await response.text();
-                    let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, ''));
-                    
-                    matches = matches.filter(link => link.includes('/736x/') || link.includes('/474x/') || link.includes('/originals/'));
+                    let matches = [...html.matchAll(/https:\/\/i\.pinimg\.com\/(?:736x|originals|564x)\/[^"'\s>]+/gi)].map(m => m[0]);
                     matches = [...new Set(matches)]; 
 
                     if (matches.length > 0) {
-                        const imgUrl = matches[Math.floor(Math.random() * Math.min(10, matches.length))];
-                        await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 Resultado para: *${args}*` }, { quoted: msg });
+                        const imgUrl = matches[Math.floor(Math.random() * Math.min(6, matches.length))];
+                        await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 *Pinterest:* ${args}` }, { quoted: msg });
                     } else {
-                        await sock.sendMessage(from, { text: '❌ No se encontraron imágenes en Pinterest para esa búsqueda.' }, { quoted: msg });
+                        await sock.sendMessage(from, { text: '❌ No encontré imágenes en Pinterest para esa búsqueda. Intentá con otra palabra.' }, { quoted: msg });
                     }
-                } catch (e) {
-                    await sock.sendMessage(from, { text: `❌ Error al buscar en Pinterest: ${e.message}` }, { quoted: msg });
+                } catch (e) { 
+                    await sock.sendMessage(from, { text: `❌ Error al buscar en Pinterest: ${e.message}` }, { quoted: msg }); 
                 }
                 return;
             }
 
-        } catch (err) {
-            console.error('[ERROR MENSAJE]', err);
+            // 🎵 LETRAS
+            if (command === '/letras' || command === '/letra') {
+                if (!args) { await sock.sendMessage(from, { text: '⚠️ Ejemplo: `/letra Roberto - Cuarteto de Nos`' }, { quoted: msg }); return; }
+                try {
+                    let data = [];
+                    if (args.includes('-')) {
+                        const [cancion, artista] = args.split('-').map(str => str.trim());
+                        let res = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cancion)}&artist_name=${encodeURIComponent(artista)}`);
+                        if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
+
+                        if (!data.length) {
+                            res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cancion + ' ' + artista)}`);
+                            if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
+                        }
+                    } else {
+                        const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
+                        if (res.ok) try { data = JSON.parse(await res.text()); } catch(e) {}
+                    }
+
+                    if (!data.length) { await sock.sendMessage(from, { text: `❌ No encontré la canción.` }, { quoted: msg }); return; }
+
+                    const track = data[0];
+                    let lyrics = track.plainLyrics;
+                    if (!lyrics && track.syncedLyrics) {
+                        lyrics = track.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
+                    }
+
+                    if (lyrics) {
+                        await sock.sendMessage(from, { text: `🎵 *${track.trackName}* - ${track.artistName}\n\n${lyrics}` }, { quoted: msg });
+                    } else {
+                        await sock.sendMessage(from, { text: `❌ La canción no tiene la letra guardada.` }, { quoted: msg });
+                    }
+                } catch (e) { await sock.sendMessage(from, { text: '❌ Error al buscar la letra.' }, { quoted: msg }); }
+                return;
+            }
+
+        } catch (globalError) {
+            console.error("[ERROR EN MENSAJE]", globalError);
         }
-    });
-}
+    }); // 🌟 Reparado: Cierre correcto del listener de eventos
+} // 🌟 Reparado: Cierre correcto de la función principal
 
 connectToWhatsApp();
