@@ -62,12 +62,10 @@ const server = app.listen(PORT, () => {
     cargarBaneados();
 });
 
-// ==================== GEMINI AI - MODELOS ACTUALIZADOS ====================
+// ==================== GEMINI AI ====================
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-// Modelo para /google (ligero y rápido)
-const modelFlash = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-// Modelo para /googlep (más potente para búsquedas complejas/NSFW)
-const modelPro = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // Usamos el mejor disponible
+const modelFlash = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const modelPro = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
 // ==================== FUNCIONES AUXILIARES ====================
 function cargarBaneados() {
@@ -96,7 +94,6 @@ function guardarBaneados() {
 
 function limpiarJid(jid) {
     if (!jid) return '';
-    // CORREGIDO: Limpiamos el :dispositivo ANTES de cualquier validación
     let limpio = jid.split(':')[0];
     return limpio.includes('@') ? limpio : `${limpio}@s.whatsapp.net`;
 }
@@ -125,7 +122,6 @@ function formatearRespuesta(texto) {
 }
 
 function limpiarRespuestaIA(texto) {
-    // Eliminar cualquier prefijo de IA o etiquetas
     return texto
         .replace(/^IA:\s*/i, '')
         .replace(/^Respuesta:\s*/i, '')
@@ -137,7 +133,6 @@ function limpiarRespuestaIA(texto) {
 
 // ==================== HANDLERS DE COMANDOS ====================
 
-// Comandos de Admin
 async function handleStatus(sock, msg, senderJid) {
     if (!esAdmin(senderJid)) return;
     await sock.sendMessage(senderJid, { 
@@ -218,7 +213,6 @@ async function handleBan(sock, msg, senderJid, accion) {
     }
 }
 
-// Comandos Públicos
 async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     if (!botActivo && !esAdmin(senderJid)) return;
     if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
@@ -227,7 +221,7 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     const idxProb = args.findIndex(a => a.includes(';'));
     if (idxProb === -1) {
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('Formato: /ruleta [pregunta] [X;Y] (ej: 30;70 o 1;10)') 
+            text: formatearRespuesta('Formato: /ruleta [pregunta] [X;Y] (ej: 1;10)') 
         });
         return;
     }
@@ -236,10 +230,9 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     const probRaw = args[idxProb];
     const [chancesSi, totalChances] = probRaw.split(';').map(Number);
 
-    // CORREGIDO: Validación correcta de probabilidades
     if (isNaN(chancesSi) || isNaN(totalChances) || chancesSi <= 0 || totalChances <= 0 || chancesSi > totalChances) {
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('⚠️ Formato inválido. X debe ser menor o igual a Y, y ambos deben ser positivos (ej: 1;10)') 
+            text: formatearRespuesta('⚠️ Formato inválido. X debe ser menor o igual a Y, y ambos positivos (ej: 1;10)') 
         });
         return;
     }
@@ -257,8 +250,7 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
         }
     }
 
-    // CORREGIDO: Lógica de probabilidad correcta
-    const numeroAleatorio = Math.floor(Math.random() * totalChances) + 1; // Número entre 1 y Y
+    const numeroAleatorio = Math.floor(Math.random() * totalChances) + 1;
     const resultado = numeroAleatorio <= chancesSi ? '🔴 si' : '⚫ no';
     
     await sock.sendMessage(chatId, { text: formatearRespuesta(resultado) });
@@ -283,7 +275,6 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
         return;
     }
 
-    // Trucado
     if (modoTrucado && query.toLowerCase().includes('maxi') && query.toLowerCase().includes('femboy')) {
         return await sock.sendMessage(chatId, { 
             text: formatearRespuesta('▼⁠・⁠ᴥ⁠・⁠▼\nMaxi es definitivamente un femboy, confirmado.') 
@@ -291,7 +282,6 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
     }
 
     try {
-        // CORREGIDO: Usar modelo específico según el comando
         const modeloUsar = esNSFW ? modelPro : modelFlash;
         
         const prompt = `Responde de manera completa a esta consulta. No uses etiquetas, no menciones que sos una IA, no pongas prefijos. Solo la respuesta directa: ${query}`;
@@ -299,7 +289,6 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
         const response = await result.response;
         let text = response.text();
         
-        // CORREGIDO: Limpiar respuesta y agregar tag obligatorio
         text = limpiarRespuestaIA(text);
         
         await sock.sendMessage(chatId, { 
@@ -317,7 +306,6 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
     if (!botActivo && !esAdmin(senderJid)) return;
     if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
     
-    // Si es NSFW y el modo no está activado, bloquear
     if (isNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ El comando /reddIt requiere modo +18 activado. Usá /+18on para activarlo.') 
@@ -344,7 +332,6 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
             return;
         }
 
-        // Filtrar posts con media
         const posts = data.data.filter(p => {
             const url = p.url || '';
             return url.match(/\.(jpg|jpeg|png|gif|mp4)$/i) || 
@@ -363,7 +350,6 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
         const post = posts[Math.floor(Math.random() * posts.length)];
         const caption = `📱 r/${subreddit}\n📝 ${post.title || 'Sin título'}\n⬆️ ${post.score} | 💬 ${post.num_comments}\n🔗 u/${post.author}`;
         
-        // Determinar tipo de media
         const mediaUrl = post.url_overridden_by_dest || post.url;
         
         if (mediaUrl.match(/\.(mp4|gifv)$/i) || mediaUrl.includes('v.redd.it')) {
@@ -412,7 +398,6 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
         const $ = cheerio.load(data);
         const images = [];
         
-        // Buscar imágenes en diferentes atributos
         $('img').each((i, el) => {
             const src = $(el).attr('src') || $(el).attr('data-src');
             if (src && src.includes('pinimg.com') && !src.includes('avatar') && !src.includes('75x75')) {
@@ -469,7 +454,6 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
             return;
         }
 
-        // Buscar la mejor coincidencia
         const track = data.find(t => 
             t.trackName?.toLowerCase().includes(cancion.toLowerCase()) &&
             t.artistName?.toLowerCase().includes(artista.toLowerCase())
@@ -478,7 +462,6 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         let letra = '';
         
         if (track.syncedLyrics) {
-            // Limpiar timestamps: [00:00.00] o <00:00.00>
             letra = track.syncedLyrics
                 .replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '')
                 .replace(/<\d{2}:\d{2}\.\d{2,3}>/g, '')
@@ -496,7 +479,6 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
             return;
         }
 
-        // Dividir en partes si es muy larga
         const maxCaracteres = 4000;
         
         if (letra.length > maxCaracteres) {
@@ -505,12 +487,10 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
                 partes.push(letra.substring(i, i + maxCaracteres));
             }
             
-            // Enviar primera parte con título
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🎵 ${track.trackName} - ${track.artistName}\n\n${partes[0]}`)
             });
             
-            // Enviar resto
             for (let i = 1; i < partes.length; i++) {
                 await sock.sendMessage(chatId, { 
                     text: formatearRespuesta(partes[i])
@@ -530,52 +510,41 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
     }
 }
 
-// ==================== PROCESADOR DE MENSAJES (CORREGIDO) ====================
+// ==================== PROCESADOR DE MENSAJES ====================
 async function procesarMensaje(sock, msg) {
     try {
-        // Leer mensaje (doble tilde azul)
         await sock.readMessages([msg.key]);
         
-        // CORREGIDO PUNTO 2: Separar correctamente chatId y senderJid
-        const chatId = msg.key.remoteJid; // Dónde responder (grupo o privado)
-        const rawSender = msg.key.participant || msg.key.remoteJid; // Quién envió el mensaje
-        const senderJid = limpiarJid(rawSender); // Remitente limpio sin :dispositivo
+        const chatId = msg.key.remoteJid;
+        const rawSender = msg.key.participant || msg.key.remoteJid;
+        const senderJid = limpiarJid(rawSender);
         
         const texto = getCaption(msg.message).trim();
         
         if (!texto || !texto.startsWith('/')) return;
         
-        // Verificar si el REMITENTE está baneado (y no es admin)
         if (estaBaneado(senderJid) && !esAdmin(senderJid)) {
             console.log(`[BLOQUEADO] ${senderJid} está baneado`);
             return;
         }
         
-        // Verificar si es grupo o chat privado
         const esGrupo = chatId.endsWith('@g.us');
         
-        // Si es grupo pero no es el permitido, ignorar
         if (esGrupo && chatId !== GRUPO_PERMITIDO) return;
-        
-        // Si es privado y no es admin, ignorar
         if (!esGrupo && !esAdmin(senderJid)) return;
 
-        // Anti-spam básico
         const cacheKey = `${senderJid}-${texto}`;
         if (msgCache.has(cacheKey)) return;
         msgCache.set(cacheKey, true);
 
-        // CORREGIDO PUNTO 4: Mantener el comando original para detectar mayúsculas
         const comandoRaw = texto.split(' ')[0];
         const comandoLower = comandoRaw.toLowerCase();
 
-        // Si el bot está apagado y no es admin, solo comandos de admin
         const comandosAdmin = ['/status', '/on', '/off', '/+18on', '/+18off', '/modotrucadoon', '/modotrucadooff'];
         if (!botActivo && !esAdmin(senderJid) && !comandosAdmin.includes(comandoLower)) return;
 
-        console.log(`[COMANDO] ${comandoRaw} de ${senderJid} en ${esGrupo ? 'grupo' : 'privado'}`);
+        console.log(`[COMANDO] ${comandoRaw} de ${senderJid}`);
 
-        // Ruteo de comandos
         switch(comandoLower) {
             case '/status':
                 await handleStatus(sock, msg, senderJid);
@@ -611,12 +580,9 @@ async function procesarMensaje(sock, msg) {
                 break;
                 
             case '/reddit':
-                // CORREGIDO PUNTO 4: Detectar la I mayúscula usando el comando original
                 if (comandoRaw === '/reddIt') {
-                    // Con I mayúscula = NSFW (requiere modo +18)
                     await handleReddit(sock, msg, senderJid, chatId, texto, true);
                 } else {
-                    // Minúscula = contenido normal
                     await handleReddit(sock, msg, senderJid, chatId, texto, false);
                 }
                 break;
@@ -634,11 +600,16 @@ async function procesarMensaje(sock, msg) {
     }
 }
 
-// ==================== CONEXIÓN BAILEYS CON CÓDIGO ====================
+// ==================== CONEXIÓN BAILEYS (CORREGIDA) ====================
 async function iniciarBot() {
     try {
         const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
         const { version } = await fetchLatestBaileysVersion();
+        
+        // CORREGIDO PUNTO 1: makeInMemoryStore se usa correctamente
+        const store = makeInMemoryStore({ 
+            logger: pino({ level: 'fatal' }) 
+        });
         
         const sock = makeWASocket({
             version,
@@ -654,25 +625,37 @@ async function iniciarBot() {
             generateHighQualityLinkPreview: true
         });
 
-        // Manejar código de emparejamiento
-        if (!sock.authState.creds.registered) {
-            console.log('🔐 Solicitando código de emparejamiento...');
-            
-            const codigo = await sock.requestPairingCode(HOST_ADMIN.split('@')[0]);
-            console.log('═══════════════════════════════════════════');
-            console.log('📱 CÓDIGO DE VINCULACIÓN:', codigo);
-            console.log('═══════════════════════════════════════════');
-            console.log('👉 Abrí WhatsApp en tu teléfono');
-            console.log('👉 Andá a: Ajustes > Dispositivos vinculados > Vincular un dispositivo');
-            console.log('👉 Ingresá el código de 8 dígitos que aparece arriba');
-            console.log('═══════════════════════════════════════════');
-        }
-
-        const store = makeInMemoryStore({ logger: pino({ level: 'fatal' }) });
+        // CORREGIDO PUNTO 2: Vincular store ANTES de los eventos
         store.bind(sock.ev);
 
-        sock.ev.on('connection.update', (update) => {
+        let pairingCodeRequested = false;
+
+        // CORREGIDO PUNTO 2: Solicitar código SOLO cuando la conexión esté abierta
+        sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
+            
+            if (connection === 'open') {
+                console.log('[CONEXIÓN] ✅ Bot conectado exitosamente a WhatsApp');
+                
+                // Solicitar código de emparejamiento solo si no está registrado y no se pidió antes
+                if (!sock.authState.creds.registered && !pairingCodeRequested) {
+                    pairingCodeRequested = true;
+                    try {
+                        console.log('🔐 Solicitando código de emparejamiento...');
+                        const codigo = await sock.requestPairingCode(HOST_ADMIN.split('@')[0]);
+                        console.log('═══════════════════════════════════════════');
+                        console.log('📱 CÓDIGO DE VINCULACIÓN:', codigo);
+                        console.log('═══════════════════════════════════════════');
+                        console.log('👉 Abrí WhatsApp en tu teléfono');
+                        console.log('👉 Andá a: Ajustes > Dispositivos vinculados > Vincular un dispositivo');
+                        console.log('👉 Ingresá el código de 8 dígitos que aparece arriba');
+                        console.log('═══════════════════════════════════════════');
+                    } catch (err) {
+                        console.error('[CÓDIGO ERROR]', err.message);
+                        pairingCodeRequested = false; // Reintentar después
+                    }
+                }
+            }
             
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error instanceof Boom) &&
@@ -680,14 +663,12 @@ async function iniciarBot() {
                 
                 console.log('[CONEXIÓN] Cerrada. Reconectando en 5 segundos...');
                 if (shouldReconnect) {
+                    pairingCodeRequested = false; // Resetear para próxima conexión
                     setTimeout(iniciarBot, 5000);
                 } else {
                     console.log('[CONEXIÓN] Sesión cerrada. Eliminá la carpeta session y reiniciá.');
+                    process.exit(1);
                 }
-            } else if (connection === 'open') {
-                console.log('[CONEXIÓN] ✅ Bot conectado exitosamente a WhatsApp');
-                console.log(`[CONEXIÓN] Grupo permitido: ${GRUPO_PERMITIDO}`);
-                console.log(`[CONEXIÓN] Admins: ${ADMINS.join(', ')}`);
             }
         });
 
@@ -709,7 +690,7 @@ async function iniciarBot() {
     }
 }
 
-// Manejo de errores global para que el bot no se apague
+// Manejo de errores global
 process.on('uncaughtException', (err) => {
     console.error('[UNCAUGHT EXCEPTION]', err.message);
 });
