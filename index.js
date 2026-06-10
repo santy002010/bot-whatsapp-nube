@@ -4,8 +4,7 @@ const {
     Browsers,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
-    DisconnectReason,
-    makeInMemoryStore
+    DisconnectReason
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
@@ -33,6 +32,7 @@ let botActivo = true;
 let modoNSFW = false;
 let modoTrucado = false;
 let baneados = [];
+let pairingCodeRequested = false;
 
 // Caché para evitar spam de comandos
 const msgCache = new NodeCache({ stdTTL: 10, checkperiod: 120 });
@@ -276,7 +276,7 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
 
     if (modoTrucado && query.toLowerCase().includes('maxi') && query.toLowerCase().includes('femboy')) {
         return await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('▼⁠・⁠ᴥ⁠・⁠▼\nMaxi es definitivamente un femboy, confirmado.') 
+            text: formatearRespuesta('▼⁠・⁠ᴥ⁠·⁠▼\nMaxi es definitivamente un femboy, confirmado.') 
         });
     }
 
@@ -291,7 +291,7 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
         text = limpiarRespuestaIA(text);
         
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta(`▼⁠・⁠ᴥ⁠・⁠▼\n${text}`) 
+            text: formatearRespuesta(`▼⁠・⁠ᴥ⁠·⁠▼\n${text}`) 
         });
     } catch (error) {
         console.error('[GEMINI ERROR]', error);
@@ -605,11 +605,6 @@ async function iniciarBot() {
         const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
         const { version } = await fetchLatestBaileysVersion();
         
-        // CORREGIDO: makeInMemoryStore se usa correctamente como función importada
-        const store = makeInMemoryStore({ 
-            logger: pino({ level: 'fatal' }) 
-        });
-        
         const sock = makeWASocket({
             version,
             auth: {
@@ -624,33 +619,33 @@ async function iniciarBot() {
             generateHighQualityLinkPreview: true
         });
 
-        store.bind(sock.ev);
-
-        let pairingCodeRequested = false;
+        // Disparador del código de emparejamiento (Mejorado fuera de bucles locos)
+        if (!sock.authState.creds.registered && !pairingCodeRequested) {
+            pairingCodeRequested = true;
+            setTimeout(async () => {
+                try {
+                    console.log('🔐 Solicitando código de emparejamiento...');
+                    const codigo = await sock.requestPairingCode(HOST_ADMIN.split('@')[0]);
+                    console.log('═══════════════════════════════════════════');
+                    console.log('📱 CÓDIGO DE VINCULACIÓN:', codigo);
+                    console.log('═══════════════════════════════════════════');
+                    console.log('👉 Abrí WhatsApp en tu teléfono');
+                    console.log('👉 Andá a: Ajustes > Dispositivos vinculados > Vincular un dispositivo');
+                    console.log('👉 Ingresá el código de 8 dígitos que aparece arriba');
+                    console.log('═══════════════════════════════════════════');
+                } catch (err) {
+                    console.error('[CÓDIGO ERROR]', err.message);
+                    pairingCodeRequested = false;
+                }
+            }, 5000); 
+        }
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
             
             if (connection === 'open') {
                 console.log('[CONEXIÓN] ✅ Bot conectado exitosamente a WhatsApp');
-                
-                if (!sock.authState.creds.registered && !pairingCodeRequested) {
-                    pairingCodeRequested = true;
-                    try {
-                        console.log('🔐 Solicitando código de emparejamiento...');
-                        const codigo = await sock.requestPairingCode(HOST_ADMIN.split('@')[0]);
-                        console.log('═══════════════════════════════════════════');
-                        console.log('📱 CÓDIGO DE VINCULACIÓN:', codigo);
-                        console.log('═══════════════════════════════════════════');
-                        console.log('👉 Abrí WhatsApp en tu teléfono');
-                        console.log('👉 Andá a: Ajustes > Dispositivos vinculados > Vincular un dispositivo');
-                        console.log('👉 Ingresá el código de 8 dígitos que aparece arriba');
-                        console.log('═══════════════════════════════════════════');
-                    } catch (err) {
-                        console.error('[CÓDIGO ERROR]', err.message);
-                        pairingCodeRequested = false;
-                    }
-                }
+                pairingCodeRequested = false;
             }
             
             if (connection === 'close') {
@@ -662,7 +657,8 @@ async function iniciarBot() {
                     pairingCodeRequested = false;
                     setTimeout(iniciarBot, 5000);
                 } else {
-                    console.log('[CONEXIÓN] Sesión cerrada. Eliminá la carpeta session y reiniciá.');
+                    console.log('[CONEXIÓN] Sesión inválida o expirada. Limpiando archivos...');
+                    try { fs.emptyDirSync(SESSION_DIR); } catch(e) {}
                     process.exit(1);
                 }
             }
