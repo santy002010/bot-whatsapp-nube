@@ -1,11 +1,14 @@
 const {
     default: makeWASocket,
-    useMultiFileAuthState,
     Browsers,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
-    DisconnectReason
+    DisconnectReason,
+    BufferJSON,       // <-- Agregado para Mongo
+    initAuthCreds,    // <-- Agregado para Mongo
+    proto             // <-- Agregado para Mongo
 } = require('@whiskeysockets/baileys');
+const { MongoClient } = require('mongodb'); // <-- Agregado para Mongo
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
@@ -15,6 +18,75 @@ const cheerio = require('cheerio');
 const fs = require('fs-extra');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// 🔑 --- FUNCIÓN PARA GUARDAR LA SESIÓN EN LA NUBE ---
+async function useMongoDBAuthState(collection) {
+    const writeData = async (data, id) => {
+        const serialized = JSON.parse(JSON.stringify(data, BufferJSON.replacer));
+        await collection.replaceOne({ _id: id }, serialized, { upsert: true });
+    };
+
+    const readData = async (id) => {
+        try {
+            const document = await collection.findOne({ _id: id });
+            if (!document) return null;
+            return JSON.parse(JSON.stringify(document), BufferJSON.reviver);
+        } catch (error) {
+            return null;
+        }
+    };
+
+    const removeData = async (id) => {
+        try {
+            await collection.deleteOne({ _id: id });
+        } catch (error) {}
+    };
+
+    let creds = await readData('creds');
+    if (!creds) {
+        creds = initAuthCreds();
+        await writeData(creds, 'creds');
+    }
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data = {};
+                    await Promise.all(
+                        ids.map(async (id) => {
+                            let value = await readData(`${type}-${id}`);
+                            if (type === 'app-state-sync-key' && value) {
+                                value = proto.Message.AppStateSyncKeyData.fromObject(value);
+                            }
+                            data[id] = value;
+                        })
+                    );
+                    return data;
+                },
+                set: async (data) => {
+                    const tasks = [];
+                    for (const category in data) {
+                        for (const id in data[category]) {
+                            const value = data[category][id];
+                            const key = `${category}-${id}`;
+                            if (value) {
+                                tasks.push(writeData(value, key));
+                            } else {
+                                tasks.push(removeData(key));
+                            }
+                        }
+                    }
+                    await Promise.all(tasks);
+                }
+            }
+        },
+        saveCreds: async () => {
+            await writeData(creds, 'creds');
+        }
+    };
+}
 
 // ==================== CONFIGURACIÓN ====================
 const PORT = process.env.PORT || 10000;
@@ -94,60 +166,8 @@ function guardarBaneados() {
 
 function limpiarJid(jid) {
     if (!jid) return '';
-    let limpio = jid.split(':')[0]; // Elimina ID de dispositivos vinculados
+    let limpio = jid.split(':')[0];
     return limpio.includes('@') ? limpio : `${limpio}@s.whatsapp.net`;
-}
-
-// Validador inteligente de Admins (ignora si WhatsApp quita o pone el 9 de Argentina)
-function esAdmin(jid) {
-    const limpio = limpiarJid(jid).split('@')[0];
-    const normalizado = limpio.startsWith('549') ? '54' + limpio.substring(3) : limpio;
-    
-    return ADMINS.some(admin => {
-        const adminLimpio = admin.split('@')[0];
-        const adminNormalizado = adminLimpio.startsWith('549') ? '54' + adminLimpio.substring(3) : adminLimpio;
-        return normalizado === adminNormalizado;
-    });
-}
-
-function estaBaneado(jid) {
-    const limpio = limpiarJid(jid).split('@')[0];
-    const normalizado = limpio.startsWith('549') ? '54' + limpio.substring(3) : limpio;
-
-    return baneados.some(b => {
-        const bLimpio = b.split('@')[0];
-        const bNormalizado = bLimpio.startsWith('549') ? '54' + bLimpio.substring(3) : bLimpio;
-        return normalizado === bNormalizado;
-    });
-}
-
-function getCaption(message) {
-    if (!message) return '';
-    // Desempaquetar si el mensaje es efímero o de una sola vez
-    if (message.ephemeralMessage) message = message.ephemeralMessage.message;
-    if (message.viewOnceMessage) message = message.viewOnceMessage.message;
-    if (message.viewOnceMessageV2) message = message.viewOnceMessageV2.message;
-    
-    if (!message) return '';
-    if (message.conversation) return message.conversation;
-    if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
-    if (message.imageMessage?.caption) return message.imageMessage.caption;
-    if (message.videoMessage?.caption) return message.videoMessage.caption;
-    return '';
-}
-
-function formatearRespuesta(texto) {
-    return `${PREFIX}${texto}`;
-}
-
-function limpiarRespuestaIA(texto) {
-    return texto
-        .replace(/^IA:\s*/i, '')
-        .replace(/^Respuesta:\s*/i, '')
-        .replace(/^Como IA.*?:/i, '')
-        .replace(/^Gemini:\s*/i, '')
-        .replace(/^Modelo:\s*/i, '')
-        .trim();
 }
 
 // ==================== HANDLERS DE COMANDOS ====================
