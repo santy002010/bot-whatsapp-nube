@@ -42,7 +42,7 @@ const app = express();
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Bot está corriendo. Accede al endpoint /status para más detalles.');
+    res.send('Bot está corriendo perfectamente.');
 });
 
 app.get('/status', (req, res) => {
@@ -94,26 +94,45 @@ function guardarBaneados() {
 
 function limpiarJid(jid) {
     if (!jid) return '';
-    let limpio = jid.split(':')[0];
+    let limpio = jid.split(':')[0]; // Elimina ID de dispositivos vinculados
     return limpio.includes('@') ? limpio : `${limpio}@s.whatsapp.net`;
 }
 
+// Validador inteligente de Admins (ignora si WhatsApp quita o pone el 9 de Argentina)
 function esAdmin(jid) {
-    const limpio = limpiarJid(jid);
-    return ADMINS.includes(limpio);
+    const limpio = limpiarJid(jid).split('@')[0];
+    const normalizado = limpio.startsWith('549') ? '54' + limpio.substring(3) : limpio;
+    
+    return ADMINS.some(admin => {
+        const adminLimpio = admin.split('@')[0];
+        const adminNormalizado = adminLimpio.startsWith('549') ? '54' + adminLimpio.substring(3) : adminLimpio;
+        return normalizado === adminNormalizado;
+    });
 }
 
 function estaBaneado(jid) {
-    const limpio = limpiarJid(jid);
-    return baneados.includes(limpio);
+    const limpio = limpiarJid(jid).split('@')[0];
+    const normalizado = limpio.startsWith('549') ? '54' + limpio.substring(3) : limpio;
+
+    return baneados.some(b => {
+        const bLimpio = b.split('@')[0];
+        const bNormalizado = bLimpio.startsWith('549') ? '54' + bLimpio.substring(3) : bLimpio;
+        return normalizado === bNormalizado;
+    });
 }
 
-function getCaption(mensaje) {
-    if (!mensaje) return '';
-    if (mensaje.conversation) return mensaje.conversation;
-    if (mensaje.extendedTextMessage?.text) return mensaje.extendedTextMessage.text;
-    if (mensaje.imageMessage?.caption) return mensaje.imageMessage.caption;
-    if (mensaje.videoMessage?.caption) return mensaje.videoMessage.caption;
+function getCaption(message) {
+    if (!message) return '';
+    // Desempaquetar si el mensaje es efímero o de una sola vez
+    if (message.ephemeralMessage) message = message.ephemeralMessage.message;
+    if (message.viewOnceMessage) message = message.viewOnceMessage.message;
+    if (message.viewOnceMessageV2) message = message.viewOnceMessageV2.message;
+    
+    if (!message) return '';
+    if (message.conversation) return message.conversation;
+    if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+    if (message.imageMessage?.caption) return message.imageMessage.caption;
+    if (message.videoMessage?.caption) return message.videoMessage.caption;
     return '';
 }
 
@@ -133,48 +152,36 @@ function limpiarRespuestaIA(texto) {
 
 // ==================== HANDLERS DE COMANDOS ====================
 
-async function handleStatus(sock, msg, senderJid) {
+async function handleStatus(sock, msg, chatId, senderJid) {
     if (!esAdmin(senderJid)) return;
-    await sock.sendMessage(senderJid, { 
-        text: formatearRespuesta(`✅ Bot operativo.\nGrupo: ${GRUPO_PERMITIDO}\nActivo: ${botActivo}\n+18: ${modoNSFW}\nTrucado: ${modoTrucado}`) 
+    await sock.sendMessage(chatId, { 
+        text: formatearRespuesta(`✅ Bot operativo.\nGrupo Permitido: Macheado correctamente\nActivo: ${botActivo}\n+18: ${modoNSFW}\nTrucado: ${modoTrucado}`) 
     });
 }
 
-async function handleToggle(sock, msg, senderJid, comando) {
+async function handleToggle(sock, msg, chatId, senderJid, comando) {
     if (!esAdmin(senderJid)) return;
     
     switch(comando) {
-        case 'on': 
-            botActivo = true; 
-            break;
-        case 'off': 
-            botActivo = false; 
-            break;
-        case '+18on': 
-            modoNSFW = true; 
-            break;
-        case '+18off': 
-            modoNSFW = false; 
-            break;
-        case 'modotrucadoon': 
-            modoTrucado = true; 
-            break;
-        case 'modotrucadooff': 
-            modoTrucado = false; 
-            break;
+        case 'on': botActivo = true; break;
+        case 'off': botActivo = false; break;
+        case '+18on': modoNSFW = true; break;
+        case '+18off': modoNSFW = false; break;
+        case 'modotrucadoon': modoTrucado = true; break;
+        case 'modotrucadooff': modoTrucado = false; break;
     }
     
-    await sock.sendMessage(senderJid, { 
+    await sock.sendMessage(chatId, { 
         text: formatearRespuesta(`✅ Modo actualizado: ${comando}`) 
     });
 }
 
-async function handleBan(sock, msg, senderJid, accion) {
+async function handleBan(sock, msg, chatId, senderJid, accion) {
     if (!esAdmin(senderJid)) return;
     
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.participant;
     if (!quoted) {
-        await sock.sendMessage(senderJid, { 
+        await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⚠️ Tenés que responder a un mensaje del usuario a banear/desbanear.') 
         });
         return;
@@ -184,29 +191,29 @@ async function handleBan(sock, msg, senderJid, accion) {
     if (!targetJid) return;
 
     if (esAdmin(targetJid)) {
-        await sock.sendMessage(senderJid, { 
+        await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ No podés banear a un administrador del bot.') 
         });
         return;
     }
 
     if (accion === 'ban') {
-        if (!baneados.includes(targetJid)) {
+        if (!estaBaneado(targetJid)) {
             baneados.push(targetJid);
             guardarBaneados();
-            await sock.sendMessage(senderJid, { 
+            await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🚫 Usuario baneado: @${targetJid.split('@')[0]}`), 
                 mentions: [targetJid] 
             });
         } else {
-            await sock.sendMessage(senderJid, { 
+            await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('⚠️ Ese usuario ya estaba baneado.') 
             });
         }
     } else {
-        baneados = baneados.filter(b => b !== targetJid);
+        baneados = baneados.filter(b => limpiarJid(b).split('@')[0] !== targetJid.split('@')[0]);
         guardarBaneados();
-        await sock.sendMessage(senderJid, { 
+        await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`✅ Usuario desbaneado: @${targetJid.split('@')[0]}`), 
             mentions: [targetJid] 
         });
@@ -282,7 +289,6 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
 
     try {
         const modeloUsar = esNSFW ? modelPro : modelFlash;
-        
         const prompt = `Responde de manera completa a esta consulta. No uses etiquetas, no menciones que sos una IA, no pongas prefijos. Solo la respuesta directa: ${query}`;
         const result = await modeloUsar.generateContent(prompt);
         const response = await result.response;
@@ -459,18 +465,15 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         ) || data[0];
 
         let letra = '';
-        
         if (track.syncedLyrics) {
             letra = track.syncedLyrics
                 .replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '')
                 .replace(/<\d{2}:\d{2}\.\d{2,3}>/g, '')
                 .trim();
         }
-        
         if (!letra && track.plainLyrics) {
             letra = track.plainLyrics;
         }
-        
         if (!letra) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No hay letra disponible para esta canción.') 
@@ -479,28 +482,22 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         }
 
         const maxCaracteres = 4000;
-        
         if (letra.length > maxCaracteres) {
             const partes = [];
             for (let i = 0; i < letra.length; i += maxCaracteres) {
                 partes.push(letra.substring(i, i + maxCaracteres));
             }
-            
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🎵 ${track.trackName} - ${track.artistName}\n\n${partes[0]}`)
             });
-            
             for (let i = 1; i < partes.length; i++) {
-                await sock.sendMessage(chatId, { 
-                    text: formatearRespuesta(partes[i])
-                });
+                await sock.sendMessage(chatId, { text: formatearRespuesta(partes[i]) });
             }
         } else {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🎵 ${track.trackName} - ${track.artistName}\n\n${letra}`)
             });
         }
-
     } catch (error) {
         console.error('[LETRAS ERROR]', error);
         await sock.sendMessage(chatId, { 
@@ -512,25 +509,26 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
 // ==================== PROCESADOR DE MENSAJES ====================
 async function procesarMensaje(sock, msg) {
     try {
-        await sock.readMessages([msg.key]);
-        
         const chatId = msg.key.remoteJid;
         const rawSender = msg.key.participant || msg.key.remoteJid;
         const senderJid = limpiarJid(rawSender);
         
         const texto = getCaption(msg.message).trim();
-        
         if (!texto || !texto.startsWith('/')) return;
-        
-        if (estaBaneado(senderJid) && !esAdmin(senderJid)) {
-            console.log(`[BLOQUEADO] ${senderJid} está baneado`);
-            return;
-        }
         
         const esGrupo = chatId.endsWith('@g.us');
         
+        // 🚨 CONTROL DE PRIVACIDAD ESTRICTO: Solo el grupo permitido o admins por privado
         if (esGrupo && chatId !== GRUPO_PERMITIDO) return;
         if (!esGrupo && !esAdmin(senderJid)) return;
+
+        // Log en consola para ver en Render que el comando entró correctamente
+        console.log(`[COMANDO DETECTADO] "${texto}" enviado por ${senderJid} en chat ${chatId}`);
+
+        if (estaBaneado(senderJid) && !esAdmin(senderJid)) {
+            console.log(`[BLOQUEADO] ${senderJid} intentó usar comandos pero está baneado`);
+            return;
+        }
 
         const cacheKey = `${senderJid}-${texto}`;
         if (msgCache.has(cacheKey)) return;
@@ -542,11 +540,9 @@ async function procesarMensaje(sock, msg) {
         const comandosAdmin = ['/status', '/on', '/off', '/+18on', '/+18off', '/modotrucadoon', '/modotrucadooff'];
         if (!botActivo && !esAdmin(senderJid) && !comandosAdmin.includes(comandoLower)) return;
 
-        console.log(`[COMANDO] ${comandoRaw} de ${senderJid}`);
-
         switch(comandoLower) {
             case '/status':
-                await handleStatus(sock, msg, senderJid);
+                await handleStatus(sock, msg, chatId, senderJid);
                 break;
                 
             case '/on':
@@ -555,15 +551,15 @@ async function procesarMensaje(sock, msg) {
             case '/+18off':
             case '/modotrucadoon':
             case '/modotrucadooff':
-                await handleToggle(sock, msg, senderJid, comandoLower.replace('/', ''));
+                await handleToggle(sock, msg, chatId, senderJid, comandoLower.replace('/', ''));
                 break;
                 
             case '/ban':
-                await handleBan(sock, msg, senderJid, 'ban');
+                await handleBan(sock, msg, chatId, senderJid, 'ban');
                 break;
                 
             case '/unban':
-                await handleBan(sock, msg, senderJid, 'unban');
+                await handleBan(sock, msg, chatId, senderJid, 'unban');
                 break;
                 
             case '/ruleta':
@@ -619,7 +615,6 @@ async function iniciarBot() {
             generateHighQualityLinkPreview: true
         });
 
-        // Disparador del código de emparejamiento (Mejorado fuera de bucles locos)
         if (!sock.authState.creds.registered && !pairingCodeRequested) {
             pairingCodeRequested = true;
             setTimeout(async () => {
@@ -628,10 +623,6 @@ async function iniciarBot() {
                     const codigo = await sock.requestPairingCode(HOST_ADMIN.split('@')[0]);
                     console.log('═══════════════════════════════════════════');
                     console.log('📱 CÓDIGO DE VINCULACIÓN:', codigo);
-                    console.log('═══════════════════════════════════════════');
-                    console.log('👉 Abrí WhatsApp en tu teléfono');
-                    console.log('👉 Andá a: Ajustes > Dispositivos vinculados > Vincular un dispositivo');
-                    console.log('👉 Ingresá el código de 8 dígitos que aparece arriba');
                     console.log('═══════════════════════════════════════════');
                 } catch (err) {
                     console.error('[CÓDIGO ERROR]', err.message);
@@ -657,7 +648,7 @@ async function iniciarBot() {
                     pairingCodeRequested = false;
                     setTimeout(iniciarBot, 5000);
                 } else {
-                    console.log('[CONEXIÓN] Sesión inválida o expirada. Limpiando archivos...');
+                    console.log('[CONEXIÓN] Sesión inválida. Limpiando archivos...');
                     try { fs.emptyDirSync(SESSION_DIR); } catch(e) {}
                     process.exit(1);
                 }
