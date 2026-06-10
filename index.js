@@ -237,7 +237,6 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
         return;
     }
 
-    // Modo Trucado
     if (modoTrucado) {
         if (pregunta.includes('maxi') && pregunta.includes('femboy')) {
             return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') });
@@ -600,13 +599,13 @@ async function procesarMensaje(sock, msg) {
     }
 }
 
-// ==================== CONEXIÓN BAILEYS (CORREGIDA) ====================
+// ==================== CONEXIÓN BAILEYS ====================
 async function iniciarBot() {
     try {
         const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
         const { version } = await fetchLatestBaileysVersion();
         
-        // CORREGIDO PUNTO 1: makeInMemoryStore se usa correctamente
+        // CORREGIDO: makeInMemoryStore se usa correctamente como función importada
         const store = makeInMemoryStore({ 
             logger: pino({ level: 'fatal' }) 
         });
@@ -625,19 +624,16 @@ async function iniciarBot() {
             generateHighQualityLinkPreview: true
         });
 
-        // CORREGIDO PUNTO 2: Vincular store ANTES de los eventos
         store.bind(sock.ev);
 
         let pairingCodeRequested = false;
 
-        // CORREGIDO PUNTO 2: Solicitar código SOLO cuando la conexión esté abierta
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
             
             if (connection === 'open') {
                 console.log('[CONEXIÓN] ✅ Bot conectado exitosamente a WhatsApp');
                 
-                // Solicitar código de emparejamiento solo si no está registrado y no se pidió antes
                 if (!sock.authState.creds.registered && !pairingCodeRequested) {
                     pairingCodeRequested = true;
                     try {
@@ -652,7 +648,7 @@ async function iniciarBot() {
                         console.log('═══════════════════════════════════════════');
                     } catch (err) {
                         console.error('[CÓDIGO ERROR]', err.message);
-                        pairingCodeRequested = false; // Reintentar después
+                        pairingCodeRequested = false;
                     }
                 }
             }
@@ -663,7 +659,7 @@ async function iniciarBot() {
                 
                 console.log('[CONEXIÓN] Cerrada. Reconectando en 5 segundos...');
                 if (shouldReconnect) {
-                    pairingCodeRequested = false; // Resetear para próxima conexión
+                    pairingCodeRequested = false;
                     setTimeout(iniciarBot, 5000);
                 } else {
                     console.log('[CONEXIÓN] Sesión cerrada. Eliminá la carpeta session y reiniciá.');
