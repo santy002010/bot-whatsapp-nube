@@ -14,7 +14,6 @@ const { Boom } = require('@hapi/boom');
 const express = require('express');
 const NodeCache = require('node-cache');
 const axios = require('axios');
-const cheerio = require('cheerio');
 const fs = require('fs-extra');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -133,7 +132,7 @@ const server = app.listen(PORT, () => {
     cargarBaneados();
 });
 
-// ==================== GEMINI AI (MODELOS 2.0 ACTUALIZADOS) ====================
+// ==================== GEMINI AI (MODELOS ACTUALIZADOS 2.0) ====================
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const modelFlash = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 const modelPro = genAI.getGenerativeModel({ model: "gemini-2.0-pro" });
@@ -202,7 +201,7 @@ async function handleStatus(sock, msg, chatId, senderJid) {
     if (!esAdmin(senderJid, msg)) return;
     await sock.sendMessage(chatId, { 
         text: formatearRespuesta(`✅ Bot operativo.\nGrupo Permitido: Macheado correctamente\nActivo: ${botActivo}\n+18: ${modoNSFW}\nTrucado: ${modoTrucado}`) 
-    });
+    }, { quoted: msg });
 }
 
 async function handleToggle(sock, msg, chatId, senderJid, comando) {
@@ -219,7 +218,7 @@ async function handleToggle(sock, msg, chatId, senderJid, comando) {
 
     await sock.sendMessage(chatId, { 
         text: formatearRespuesta(`✅ Modo actualizado: ${comando}`) 
-    });
+    }, { quoted: msg });
 }
 
 async function handleBan(sock, msg, chatId, senderJid, accion) {
@@ -229,7 +228,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
     if (!quoted) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⚠️ Tenés que responder a un mensaje del usuario a banear/desbanear.') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -239,7 +238,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
     if (esAdmin(targetJid, null)) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ No podés banear a un administrador del bot.') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -250,11 +249,11 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🚫 Usuario baneado: @${targetJid.split('@')[0]}`), 
                 mentions: [targetJid] 
-            });
+            }, { quoted: msg });
         } else {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('⚠️ Ese usuario ya estaba baneado.') 
-            });
+            }, { quoted: msg });
         }
     } else {
         baneados = baneados.filter(b => limpiarJid(b).split('@')[0] !== targetJid.split('@')[0]);
@@ -262,7 +261,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`✅ Usuario desbaneado: @${targetJid.split('@')[0]}`), 
             mentions: [targetJid] 
-            });
+        }, { quoted: msg });
     }
 }
 
@@ -275,7 +274,7 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     if (idxProb === -1) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('Formato: /ruleta [pregunta] [X;Y] (ej: 1;10)') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -286,26 +285,26 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     if (isNaN(chancesSi) || isNaN(totalChances) || chancesSi <= 0 || totalChances <= 0 || chancesSi > totalChances) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⚠️ Formato inválido. X debe ser menor o igual a Y, y ambos positivos (ej: 1;10)') 
-        });
+        }, { quoted: msg });
         return;
     }
 
     if (modoTrucado) {
         if (pregunta.includes('maxi') && pregunta.includes('femboy')) {
-            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') });
+            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') }, { quoted: msg });
         }
         if (pregunta.includes('dylan') && pregunta.includes('perra')) {
-            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') });
+            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') }, { quoted: msg });
         }
         if (pregunta.includes('omeguita')) {
-            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') });
+            return await sock.sendMessage(chatId, { text: formatearRespuesta('🔴 si') }, { quoted: msg });
         }
     }
 
     const numeroAleatorio = Math.floor(Math.random() * totalChances) + 1;
     const resultado = numeroAleatorio <= chancesSi ? '🔴 si' : '⚫ no';
 
-    await sock.sendMessage(chatId, { text: formatearRespuesta(resultado) });
+    await sock.sendMessage(chatId, { text: formatearRespuesta(resultado) }, { quoted: msg });
 }
 
 async function handleGoogle(sock, msg, senderJid, chatId, texto, usarPro) {
@@ -316,14 +315,14 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, usarPro) {
     if (!query) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`Formato: ${usarPro ? '/googlep' : '/google'} [búsqueda]`) 
-        });
+        }, { quoted: msg });
         return;
     }
 
     if (modoTrucado && query.toLowerCase().includes('maxi') && query.toLowerCase().includes('femboy')) {
         return await sock.sendMessage(chatId, { 
             text: formatearRespuesta('▼⁠・⁠ᴥ⁠·⁠▼\nMaxi es definitivamente un femboy, confirmado.') 
-        });
+        }, { quoted: msg });
     }
 
     try {
@@ -337,12 +336,12 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, usarPro) {
 
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`▼⁠・⁠ᴥ⁠·⁠▼\n${text}`) 
-        });
+        }, { quoted: msg });
     } catch (error) {
         console.error('[GEMINI ERROR]', error);
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⚠️ Error al conectar con Gemini.') 
-        });
+        }, { quoted: msg });
     }
 }
 
@@ -353,7 +352,7 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
     if (isNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ El comando /reddIt requiere modo +18 activado. Usá /+18on para activarlo.') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -361,7 +360,7 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
     if (!subreddit) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('Formato: /reddit [subreddit]') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -372,47 +371,38 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
         if (!data.data || data.data.length === 0) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No se encontraron posts en ese subreddit.') 
-            });
+            }, { quoted: msg });
             return;
         }
 
-        const posts = data.data.filter(p => {
-            const url = p.url || '';
-            return url.match(/\.(jpg|jpeg|png|gif|mp4)$/i) || 
-                   url.includes('imgur.com') || 
-                   url.includes('redd.it') ||
-                   url.includes('i.redd.it');
-        });
+        // Filtramos para obtener únicamente publicaciones de TEXTO (Relatos)
+        const postsconTexto = data.data.filter(p => p.selftext && p.selftext.trim().length > 10);
 
-        if (posts.length === 0) {
+        if (postsconTexto.length === 0) {
             await sock.sendMessage(chatId, { 
-                text: formatearRespuesta('No hay imágenes/videos disponibles en este momento.') 
-            });
+                text: formatearRespuesta('No encontré relatos de texto en este subreddit. Asegurate de usar un subreddit de historias escritas (ej: /reddit nosleep o /reddit anecdotes).') 
+            }, { quoted: msg });
             return;
         }
 
-        const post = posts[Math.floor(Math.random() * posts.length)];
-        const caption = `📱 r/${subreddit}\n📝 ${post.title || 'Sin título'}\n⬆️ ${post.score} | 💬 ${post.num_comments}\n🔗 u/${post.author}`;
-
-        const mediaUrl = post.url_overridden_by_dest || post.url;
-
-        if (mediaUrl.match(/\.(mp4|gifv)$/i) || mediaUrl.includes('v.redd.it')) {
-            await sock.sendMessage(chatId, { 
-                video: { url: mediaUrl }, 
-                caption: formatearRespuesta(caption),
-                gifPlayback: mediaUrl.endsWith('.gifv')
-            });
-        } else {
-            await sock.sendMessage(chatId, { 
-                image: { url: mediaUrl }, 
-                caption: formatearRespuesta(caption)
-            });
+        const post = postsconTexto[Math.floor(Math.random() * postsconTexto.length)];
+        
+        let relato = post.selftext;
+        if (relato.length > 3500) {
+            relato = relato.substring(0, 3500) + '... *(Texto demasiado largo)*';
         }
+
+        const caption = `📱 **r/${subreddit}**\n📝 **${post.title || 'Sin título'}**\n🔗 u/${post.author || 'Anónimo'}\n⬆️ ${post.score || 0} | 💬 ${post.num_comments || 0}\n\n${relato}`;
+
+        await sock.sendMessage(chatId, { 
+            text: formatearRespuesta(caption)
+        }, { quoted: msg });
+
     } catch (error) {
         console.error('[REDDIT ERROR]', error);
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('⚠️ Error al buscar en Reddit. Probá con otro subreddit.') 
-        });
+            text: formatearRespuesta('⚠️ Error al buscar relatos en Reddit.') 
+        }, { quoted: msg });
     }
 }
 
@@ -424,7 +414,7 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
     if (!query) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('Formato: /pin [búsqueda]') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -432,42 +422,34 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
         const searchUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`;
         const { data } = await axios.get(searchUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
             },
             timeout: 10000
         });
 
-        const $ = cheerio.load(data);
-        const images = [];
+        // Extracción robusta de enlaces de imágenes usando Regex para saltearse el bloqueo web
+        const matches = data.match(/https:\/\/i\.pinimg\.com\/(?:236x|474x|736x)\/[a-f0-9/]+\.(?:jpg|jpeg|png)/g);
 
-        $('img').each((i, el) => {
-            const src = $(el).attr('src') || $(el).attr('data-src');
-            if (src && src.includes('pinimg.com') && !src.includes('avatar') && !src.includes('75x75')) {
-                images.push(src);
-            }
-        });
-
-        if (images.length === 0) {
+        if (!matches || matches.length === 0) {
             await sock.sendMessage(chatId, { 
-                text: formatearRespuesta('No encontré imágenes para esa búsqueda.') 
-            });
+                text: formatearRespuesta('No encontré imágenes para esa búsqueda en Pinterest.') 
+            }, { quoted: msg });
             return;
         }
 
-        const randomImg = images[Math.floor(Math.random() * images.length)];
-        const imagenFinal = randomImg.replace(/\/\d+x\d+/, '/originals');
+        const randomImg = matches[Math.floor(Math.random() * matches.length)];
+        // Convertimos a resolución original completa
+        const imagenFinal = randomImg.replace(/\/(?:236x|474x|736x)\//, '/originals/');
 
         await sock.sendMessage(chatId, { 
             image: { url: imagenFinal }, 
             caption: formatearRespuesta(`📌 Pinterest: ${query}`)
-        });
+        }, { quoted: msg });
     } catch (error) {
         console.error('[PINTEREST ERROR]', error);
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('⚠️ Error al buscar en Pinterest.') 
-        });
+            text: formatearRespuesta('⚠️ Error al conectar con Pinterest.') 
+        }, { quoted: msg });
     }
 }
 
@@ -479,7 +461,7 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
     if (!busqueda.includes('-')) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('Formato: /letras [canción - artista]') 
-        });
+        }, { quoted: msg });
         return;
     }
 
@@ -494,7 +476,7 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         if (!data || data.length === 0) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No encontré la letra de esa canción.') 
-            });
+            }, { quoted: msg });
             return;
         }
 
@@ -516,7 +498,7 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         if (!letra) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No hay letra disponible para esta canción.') 
-            });
+            }, { quoted: msg });
             return;
         }
 
@@ -528,20 +510,20 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
             }
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🎵 ${track.trackName} - ${track.artistName}\n\n${partes[0]}`)
-            });
+            }, { quoted: msg });
             for (let i = 1; i < partes.length; i++) {
-                await sock.sendMessage(chatId, { text: formatearRespuesta(partes[i]) });
+                await sock.sendMessage(chatId, { text: formatearRespuesta(partes[i]) }, { quoted: msg });
             }
         } else {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta(`🎵 ${track.trackName} - ${track.artistName}\n\n${letra}`)
-            });
+            }, { quoted: msg });
         }
     } catch (error) {
         console.error('[LETRAS ERROR]', error);
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⚠️ Error al buscar la letra.') 
-        });
+        }, { quoted: msg });
     }
 }
 // ==================== PROCESADOR DE MENSAJES ====================
