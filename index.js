@@ -155,6 +155,7 @@ function cargarBaneados() {
     }
 }
 
+// Guardar lista de usuarios restringidos
 function guardarBaneados() {
     try {
         fs.ensureDirSync(SESSION_DIR);
@@ -181,7 +182,7 @@ async function handleStatus(sock, msg, chatId, senderJid) {
 
 async function handleToggle(sock, msg, chatId, senderJid, comando) {
     if (!esAdmin(senderJid)) return;
-    
+
     switch(comando) {
         case 'on': botActivo = true; break;
         case 'off': botActivo = false; break;
@@ -190,7 +191,7 @@ async function handleToggle(sock, msg, chatId, senderJid, comando) {
         case 'modotrucadoon': modoTrucado = true; break;
         case 'modotrucadooff': modoTrucado = false; break;
     }
-    
+
     await sock.sendMessage(chatId, { 
         text: formatearRespuesta(`✅ Modo actualizado: ${comando}`) 
     });
@@ -198,7 +199,7 @@ async function handleToggle(sock, msg, chatId, senderJid, comando) {
 
 async function handleBan(sock, msg, chatId, senderJid, accion) {
     if (!esAdmin(senderJid)) return;
-    
+
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.participant;
     if (!quoted) {
         await sock.sendMessage(chatId, { 
@@ -236,7 +237,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`✅ Usuario desbaneado: @${targetJid.split('@')[0]}`), 
             mentions: [targetJid] 
-        });
+            });
     }
 }
 
@@ -278,14 +279,14 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
 
     const numeroAleatorio = Math.floor(Math.random() * totalChances) + 1;
     const resultado = numeroAleatorio <= chancesSi ? '🔴 si' : '⚫ no';
-    
+
     await sock.sendMessage(chatId, { text: formatearRespuesta(resultado) });
 }
 
 async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
     if (!botActivo && !esAdmin(senderJid)) return;
     if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
-    
+
     if (esNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ Modo +18 desactivado.') 
@@ -313,9 +314,9 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
         const result = await modeloUsar.generateContent(prompt);
         const response = await result.response;
         let text = response.text();
-        
+
         text = limpiarRespuestaIA(text);
-        
+
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`▼⁠・⁠ᴥ⁠·⁠▼\n${text}`) 
         });
@@ -330,7 +331,7 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
 async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
     if (!botActivo && !esAdmin(senderJid)) return;
     if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
-    
+
     if (isNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ El comando /reddIt requiere modo +18 activado. Usá /+18on para activarlo.') 
@@ -349,7 +350,7 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
     try {
         const url = `https://api.pullpush.io/reddit/search/submission/?subreddit=${subreddit}&size=50&sort=desc&over_18=${isNSFW}`;
         const { data } = await axios.get(url, { timeout: 10000 });
-        
+
         if (!data.data || data.data.length === 0) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No se encontraron posts en ese subreddit.') 
@@ -374,9 +375,9 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
 
         const post = posts[Math.floor(Math.random() * posts.length)];
         const caption = `📱 r/${subreddit}\n📝 ${post.title || 'Sin título'}\n⬆️ ${post.score} | 💬 ${post.num_comments}\n🔗 u/${post.author}`;
-        
+
         const mediaUrl = post.url_overridden_by_dest || post.url;
-        
+
         if (mediaUrl.match(/\.(mp4|gifv)$/i) || mediaUrl.includes('v.redd.it')) {
             await sock.sendMessage(chatId, { 
                 video: { url: mediaUrl }, 
@@ -526,7 +527,7 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
     }
 }
 
-// ==================== FUNCIONES DETECTADAS COMO FALTANTES (REPARADAS) ====================
+// ==================== FUNCIONES AUXILIARES DE CONTROL ====================
 function esAdmin(jid) {
     return ADMINS.includes(jid);
 }
@@ -545,8 +546,8 @@ function getCaption(message) {
 }
 
 function formatearRespuesta(texto) {
-    // Si usabas un formateador especial podés cambiarlo acá, sino devuelve el texto limpio
-    return texto;
+    if (texto.trim().startsWith('[¡+!]')) return texto;
+    return `[¡+!]\n${texto}`;
 }
 
 function limpiarRespuestaIA(texto) {
@@ -565,9 +566,8 @@ async function procesarMensaje(sock, msg) {
 
         const esGrupo = chatId.endsWith('@g.us');
 
-        // 🚨 CONTROL DE PRIVACIDAD: Solo el grupo permitido o admins por privado
-        if (esGrupo && chatId !== GRUPO_PERMITIDO) return;
-        if (!esGrupo && !esAdmin(senderJid)) return;
+        // 🚨 CONTROL DE PRIVACIDAD: Únicamente responde en el grupo permitido.
+        if (!esGrupo || chatId !== GRUPO_PERMITIDO) return;
 
         console.log(`[COMANDO DETECTADO] "${texto}" enviado por ${senderJid} en chat ${chatId}`);
 
@@ -649,7 +649,7 @@ async function iniciarBot() {
         await mongoClient.connect();
         const db = mongoClient.db("whatsapp_bot");
         const collection = db.collection("session");
-        
+
         // Cargamos la sesión directo de la nube
         const { state, saveCreds } = await useMongoDBAuthState(collection);
         const { version } = await fetchLatestBaileysVersion();
@@ -693,14 +693,12 @@ async function iniciarBot() {
             }
 
             if (connection === 'close') {
-                // Detectamos el código de error de WhatsApp
                 const statusCode = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.statusCode;
                 console.log(`[CONEXIÓN] Cerrada. Razón/Código: ${statusCode}. Procesando reconexión...`);
 
                 pairingCodeRequested = false;
 
                 if (statusCode === DisconnectReason.loggedOut) {
-                    // Si explícitamente se cerró la sesión desde el celular
                     console.log('[CONEXIÓN] Sesión eliminada de WhatsApp. Limpiando base de datos para empezar de cero...');
                     try {
                         await collection.deleteMany({}); 
@@ -709,20 +707,22 @@ async function iniciarBot() {
                     }
                     setTimeout(iniciarBot, 5000);
                 } else {
-                    // Para cualquier otro error (red, timeout, o el rechazo por rate-limit de WhatsApp)
-                    // Esperamos 8 segundos y reintentamos internamente SIN apagar el proceso
                     console.log('[CONEXIÓN] Desconexión temporal o rechazo de servidor. Reintentando en 8 segundos...');
                     setTimeout(iniciarBot, 8000);
                 }
             }
         });
 
-       // Guardar credenciales automáticamente en MongoDB cada vez que cambien
+        // Guardar credenciales automáticamente en MongoDB cada vez que cambien
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+            if (!msg.message) return;
+
+            // Evitar bucles infinitos: Si el mensaje es enviado por el bot y lleva el prefijo distintivo, no se procesa.
+            const textoPrevia = getCaption(msg.message).trim();
+            if (msg.key.fromMe && textoPrevia.startsWith('[¡+!]')) return;
 
             procesarMensaje(sock, msg).catch(err => {
                 console.error('[ERROR MENSAJE]', err);
