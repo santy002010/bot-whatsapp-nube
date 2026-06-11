@@ -133,10 +133,10 @@ const server = app.listen(PORT, () => {
     cargarBaneados();
 });
 
-// ==================== GEMINI AI ====================
+// ==================== GEMINI AI (MODELOS 2.0 ACTUALIZADOS) ====================
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const modelFlash = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-const modelPro = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+const modelFlash = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const modelPro = genAI.getGenerativeModel({ model: "gemini-2.0-pro" });
 
 // ==================== FUNCIONES AUXILIARES DE CONTROL ====================
 function cargarBaneados() {
@@ -262,7 +262,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`✅ Usuario desbaneado: @${targetJid.split('@')[0]}`), 
             mentions: [targetJid] 
-        });
+            });
     }
 }
 
@@ -308,21 +308,14 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
     await sock.sendMessage(chatId, { text: formatearRespuesta(resultado) });
 }
 
-async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
+async function handleGoogle(sock, msg, senderJid, chatId, texto, usarPro) {
     if (!botActivo && !esAdmin(senderJid, msg)) return;
     if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
-
-    if (esNSFW && !modoNSFW) {
-        await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('⛔ Modo +18 desactivado.') 
-        });
-        return;
-    }
 
     const query = texto.split(' ').slice(1).join(' ').trim();
     if (!query) {
         await sock.sendMessage(chatId, { 
-            text: formatearRespuesta('Formato: /google [búsqueda]') 
+            text: formatearRespuesta(`Formato: ${usarPro ? '/googlep' : '/google'} [búsqueda]`) 
         });
         return;
     }
@@ -334,7 +327,7 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
     }
 
     try {
-        const modeloUsar = esNSFW ? modelPro : modelFlash;
+        const modeloUsar = usarPro ? modelPro : modelFlash;
         const prompt = `Responde de manera completa a esta consulta. No uses etiquetas, no menciones que sos una IA, no pongas prefijos. Solo la respuesta directa: ${query}`;
         const result = await modeloUsar.generateContent(prompt);
         const response = await result.response;
