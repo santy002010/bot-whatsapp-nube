@@ -26,12 +26,10 @@ app.listen(PORT, () => {
 
 const ALLOWED_GROUP = '120363426591951143@g.us';
 const ADMINS = ['5491128394646@s.whatsapp.net', '5491178972853@s.whatsapp.net'];
-const HOST_NUMBER = '5491128394646'; 
 
 let botEnabled = true;
 let nsfwEnabled = false;
 let modoTrucado = true;
-let codigoSolicitado = false; 
 
 const AUTH_DIR = path.join(__dirname, 'auth_session_v3'); 
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
@@ -50,7 +48,7 @@ function saveBannedUsers(list) {
 }
 
 // ==========================================
-// 2. MOTOR DEL BOT Y LOGICA DE CONEXIÓN
+// 2. MOTOR DEL BOT Y LOGICA DE CONEXIÓN (100% PERMANENTE)
 // ==========================================
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -90,10 +88,10 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = update; 
 
         if (connection === 'close') {
-            codigoSolicitado = false; 
             const reason = lastDisconnect?.error?.output?.statusCode;
             console.log(`[SISTEMA] Conexión cerrada (Código: ${reason}). Reconectando...`);
             
+            // Si el corte es normal (caída de Render o red), reconecta usando la sesión guardada
             if (reason !== DisconnectReason.loggedOut) {
                 setTimeout(() => connectToWhatsApp(), 10000); 
             }
@@ -101,30 +99,8 @@ async function connectToWhatsApp() {
         }
 
         if (connection === 'open') {
-            console.log('[SISTEMA] ¡Bot conectado con éxito a WhatsApp! 🎉');
-            codigoSolicitado = false;
+            console.log('[SISTEMA] ¡Bot conectado con éxito usando la sesión permanente! 🎉');
             return;
-        }
-
-        if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
-            codigoSolicitado = true; 
-
-            setTimeout(async () => {
-                try {
-                    const numeroLimpio = HOST_NUMBER.replace(/[^0-9]/g, '');
-                    console.log(`[SISTEMA] Solicitando código seguro para: ${numeroLimpio}`);
-                    
-                    let code = await sock.requestPairingCode(numeroLimpio);
-                    code = code?.match(/.{1,4}/g)?.join('-') || code;
-                    
-                    console.log(`\n====================================`);
-                    console.log(`🔥 TU CÓDIGO DE VINCULACIÓN ACTUAL: ${code.toUpperCase()} 🔥`);
-                    console.log(`====================================\n`);
-                } catch (err) {
-                    console.error(`❌ Error al generar el código de vinculación:`, err.message);
-                    codigoSolicitado = false; 
-                }
-            }, 8000); 
         }
     });
 
