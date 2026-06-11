@@ -4,11 +4,11 @@ const {
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     DisconnectReason,
-    BufferJSON,       // <-- Agregado para Mongo
-    initAuthCreds,    // <-- Agregado para Mongo
-    proto             // <-- Agregado para Mongo
+    BufferJSON,       
+    initAuthCreds,    
+    proto             
 } = require('@whiskeysockets/baileys');
-const { MongoClient } = require('mongodb'); // <-- Agregado para Mongo
+const { MongoClient } = require('mongodb'); 
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
@@ -18,6 +18,26 @@ const cheerio = require('cheerio');
 const fs = require('fs-extra');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// ==================== CONFIGURACIÓN ====================
+const PORT = process.env.PORT || 10000;
+const GRUPO_PERMITIDO = '120363426591951143@g.us';
+const ADMINS_RAW = ['5491128394646', '5491178972853'];
+const ADMINS = ADMINS_RAW.map(a => `${a}@s.whatsapp.net`);
+const HOST_ADMIN = '5491128394646@s.whatsapp.net';
+const GEMINI_API_KEY = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI';
+const BAN_FILE = './session/baneados.json';
+const SESSION_DIR = './session';
+
+// Estado Global
+let botActivo = true;
+let modoNSFW = false;
+let modoTrucado = false;
+let baneados = [];
+let pairingCodeRequested = false;
+
+// Caché para evitar spam de comandos
+const msgCache = new NodeCache({ stdTTL: 10, checkperiod: 120 });
 
 // 🔑 --- FUNCIÓN PARA GUARDAR LA SESIÓN EN LA NUBE ---
 async function useMongoDBAuthState(collection) {
@@ -88,27 +108,6 @@ async function useMongoDBAuthState(collection) {
     };
 }
 
-// ==================== CONFIGURACIÓN ====================
-const PORT = process.env.PORT || 10000;
-const GRUPO_PERMITIDO = '120363426591951143@g.us';
-const ADMINS_RAW = ['5491128394646', '5491178972853'];
-const ADMINS = ADMINS_RAW.map(a => `${a}@s.whatsapp.net`);
-const HOST_ADMIN = '5491128394646@s.whatsapp.net';
-const GEMINI_API_KEY = 'AIzaSyAxeWKyd8nR6GFrhHg7XBmq2cWwCPVyADI';
-const PREFIX = '[¡+!] \n';
-const BAN_FILE = './session/baneados.json';
-const SESSION_DIR = './session';
-
-// Estado Global
-let botActivo = true;
-let modoNSFW = false;
-let modoTrucado = false;
-let baneados = [];
-let pairingCodeRequested = false;
-
-// Caché para evitar spam de comandos
-const msgCache = new NodeCache({ stdTTL: 10, checkperiod: 120 });
-
 // ==================== INICIALIZAR EXPRESS ====================
 const app = express();
 app.use(express.json());
@@ -139,7 +138,7 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const modelFlash = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 const modelPro = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
-// ==================== FUNCIONES AUXILIARES ====================
+// ==================== FUNCIONES AUXILIARES DE CONTROL ====================
 function cargarBaneados() {
     try {
         if (fs.existsSync(BAN_FILE)) {
@@ -155,7 +154,6 @@ function cargarBaneados() {
     }
 }
 
-// Guardar lista de usuarios restringidos
 function guardarBaneados() {
     try {
         fs.ensureDirSync(SESSION_DIR);
@@ -171,17 +169,44 @@ function limpiarJid(jid) {
     return limpio.includes('@') ? limpio : `${limpio}@s.whatsapp.net`;
 }
 
+function esAdmin(jid, msg) {
+    if (msg?.key?.fromMe) return true;
+    return ADMINS.includes(jid);
+}
+
+function estaBaneado(jid) {
+    return baneados.includes(jid);
+}
+
+function getCaption(message) {
+    if (!message) return '';
+    if (message.conversation) return message.conversation;
+    if (message.extendedTextMessage) return message.extendedTextMessage.text;
+    if (message.imageMessage) return message.imageMessage.caption;
+    if (message.videoMessage) return message.videoMessage.caption;
+    return '';
+}
+
+function formatearRespuesta(texto) {
+    if (texto.trim().startsWith('[¡+!]')) return texto;
+    return `[¡+!]\n${texto}`;
+}
+
+function limpiarRespuestaIA(texto) {
+    return texto.replace(/ia:/gi, '').trim();
+}
+
 // ==================== HANDLERS DE COMANDOS ====================
 
 async function handleStatus(sock, msg, chatId, senderJid) {
-    if (!esAdmin(senderJid)) return;
+    if (!esAdmin(senderJid, msg)) return;
     await sock.sendMessage(chatId, { 
         text: formatearRespuesta(`✅ Bot operativo.\nGrupo Permitido: Macheado correctamente\nActivo: ${botActivo}\n+18: ${modoNSFW}\nTrucado: ${modoTrucado}`) 
     });
 }
 
 async function handleToggle(sock, msg, chatId, senderJid, comando) {
-    if (!esAdmin(senderJid)) return;
+    if (!esAdmin(senderJid, msg)) return;
 
     switch(comando) {
         case 'on': botActivo = true; break;
@@ -198,7 +223,7 @@ async function handleToggle(sock, msg, chatId, senderJid, comando) {
 }
 
 async function handleBan(sock, msg, chatId, senderJid, accion) {
-    if (!esAdmin(senderJid)) return;
+    if (!esAdmin(senderJid, msg)) return;
 
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.participant;
     if (!quoted) {
@@ -211,7 +236,7 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
     const targetJid = limpiarJid(quoted);
     if (!targetJid) return;
 
-    if (esAdmin(targetJid)) {
+    if (esAdmin(targetJid, null)) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta('⛔ No podés banear a un administrador del bot.') 
         });
@@ -237,13 +262,13 @@ async function handleBan(sock, msg, chatId, senderJid, accion) {
         await sock.sendMessage(chatId, { 
             text: formatearRespuesta(`✅ Usuario desbaneado: @${targetJid.split('@')[0]}`), 
             mentions: [targetJid] 
-            });
+        });
     }
 }
 
 async function handleRuleta(sock, msg, senderJid, chatId, texto) {
-    if (!botActivo && !esAdmin(senderJid)) return;
-    if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
+    if (!botActivo && !esAdmin(senderJid, msg)) return;
+    if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
 
     const args = texto.split(' ');
     const idxProb = args.findIndex(a => a.includes(';'));
@@ -284,8 +309,8 @@ async function handleRuleta(sock, msg, senderJid, chatId, texto) {
 }
 
 async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
-    if (!botActivo && !esAdmin(senderJid)) return;
-    if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
+    if (!botActivo && !esAdmin(senderJid, msg)) return;
+    if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
 
     if (esNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
@@ -329,8 +354,8 @@ async function handleGoogle(sock, msg, senderJid, chatId, texto, esNSFW) {
 }
 
 async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
-    if (!botActivo && !esAdmin(senderJid)) return;
-    if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
+    if (!botActivo && !esAdmin(senderJid, msg)) return;
+    if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
 
     if (isNSFW && !modoNSFW) {
         await sock.sendMessage(chatId, { 
@@ -399,8 +424,8 @@ async function handleReddit(sock, msg, senderJid, chatId, texto, isNSFW) {
 }
 
 async function handlePinterest(sock, msg, senderJid, chatId, texto) {
-    if (!botActivo && !esAdmin(senderJid)) return;
-    if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
+    if (!botActivo && !esAdmin(senderJid, msg)) return;
+    if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
 
     const query = texto.split(' ').slice(1).join(' ').trim();
     if (!query) {
@@ -454,8 +479,8 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
 }
 
 async function handleLetras(sock, msg, senderJid, chatId, texto) {
-    if (!botActivo && !esAdmin(senderJid)) return;
-    if (estaBaneado(senderJid) && !esAdmin(senderJid)) return;
+    if (!botActivo && !esAdmin(senderJid, msg)) return;
+    if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) return;
 
     const busqueda = texto.split(' ').slice(1).join(' ').trim();
     if (!busqueda.includes('-')) {
@@ -526,34 +551,6 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         });
     }
 }
-
-// ==================== FUNCIONES AUXILIARES DE CONTROL ====================
-function esAdmin(jid) {
-    return ADMINS.includes(jid);
-}
-
-function estaBaneado(jid) {
-    return baneados.includes(jid);
-}
-
-function getCaption(message) {
-    if (!message) return '';
-    if (message.conversation) return message.conversation;
-    if (message.extendedTextMessage) return message.extendedTextMessage.text;
-    if (message.imageMessage) return message.imageMessage.caption;
-    if (message.videoMessage) return message.videoMessage.caption;
-    return '';
-}
-
-function formatearRespuesta(texto) {
-    if (texto.trim().startsWith('[¡+!]')) return texto;
-    return `[¡+!]\n${texto}`;
-}
-
-function limpiarRespuestaIA(texto) {
-    return texto.replace(/ia:/gi, '').trim();
-}
-
 // ==================== PROCESADOR DE MENSAJES ====================
 async function procesarMensaje(sock, msg) {
     try {
@@ -571,7 +568,7 @@ async function procesarMensaje(sock, msg) {
 
         console.log(`[COMANDO DETECTADO] "${texto}" enviado por ${senderJid} en chat ${chatId}`);
 
-        if (estaBaneado(senderJid) && !esAdmin(senderJid)) {
+        if (estaBaneado(senderJid) && !esAdmin(senderJid, msg)) {
             console.log(`[BLOQUEADO] ${senderJid} intentó usar comandos pero está baneado`);
             return;
         }
@@ -584,7 +581,7 @@ async function procesarMensaje(sock, msg) {
         const comandoLower = comandoRaw.toLowerCase();
 
         const comandosAdmin = ['/status', '/on', '/off', '/+18on', '/+18off', '/modotrucadoon', '/modotrucadooff'];
-        if (!botActivo && !esAdmin(senderJid) && !comandosAdmin.includes(comandoLower)) return;
+        if (!botActivo && !esAdmin(senderJid, msg) && !comandosAdmin.includes(comandoLower)) return;
 
         switch(comandoLower) {
             case '/status':
@@ -650,7 +647,6 @@ async function iniciarBot() {
         const db = mongoClient.db("whatsapp_bot");
         const collection = db.collection("session");
 
-        // Cargamos la sesión directo de la nube
         const { state, saveCreds } = await useMongoDBAuthState(collection);
         const { version } = await fetchLatestBaileysVersion();
 
@@ -713,14 +709,12 @@ async function iniciarBot() {
             }
         });
 
-        // Guardar credenciales automáticamente en MongoDB cada vez que cambien
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             if (!msg.message) return;
 
-            // Evitar bucles infinitos: Si el mensaje es enviado por el bot y lleva el prefijo distintivo, no se procesa.
             const textoPrevia = getCaption(msg.message).trim();
             if (msg.key.fromMe && textoPrevia.startsWith('[¡+!]')) return;
 
