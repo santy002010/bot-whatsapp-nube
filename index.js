@@ -104,19 +104,23 @@ async function connectToWhatsApp() {
         }
     });
 
-    // ==========================================
+    //     // ==========================================
     // 3. INTERPRETACIÓN DE MENSAJES Y COMANDOS
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
+            if (!msg.message) return; // ¡SOLUCIÓN! Quitamos el 'fromMe' de acá para que no te ignore
 
             const from = msg.key.remoteJid;
             if (from !== ALLOWED_GROUP) return;
 
-            let sender = msg.key.participant || msg.key.remoteJid;
+            // Detectamos si el mensaje lo estás escribiendo vos desde el número del bot
+            const esMiPropioNumero = msg.key.fromMe;
 
+            let sender = msg.key.participant || msg.key.remoteJid;
+            
+            // Si el texto no empieza con barra, no hace nada (evita bucles)
             const text = msg.message.conversation || 
                          msg.message.extendedTextMessage?.text || 
                          msg.message.imageMessage?.caption || '';
@@ -128,7 +132,8 @@ async function connectToWhatsApp() {
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
 
-            const isAdmin = ADMINS.includes(sender);
+            // Si el mensaje es de tu propio número, sos ADMIN automático
+            const isAdmin = ADMINS.includes(sender) || esMiPropioNumero;
             const bannedList = getBannedUsers();
 
             if (bannedList.includes(sender) && !isAdmin) return;
@@ -193,7 +198,6 @@ async function connectToWhatsApp() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
-}
 
 // ==========================================
 // 4. LÓGICA DE LOS COMANDOS (FUNCIONES)
