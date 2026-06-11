@@ -526,6 +526,7 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
         }, { quoted: msg });
     }
 }
+
 // ==================== PROCESADOR DE MENSAJES ====================
 async function procesarMensaje(sock, msg) {
     try {
@@ -717,3 +718,4 @@ process.on('unhandledRejection', (reason, promise) => {
 // Iniciar todo
 console.log('🚀 Iniciando bot...');
 iniciarBot();
+
