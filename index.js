@@ -419,10 +419,10 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
             },
             timeout: 10000
         });
-        
+
         const $ = cheerio.load(data);
         const images = [];
-        
+
         $('img').each((i, el) => {
             const src = $(el).attr('src') || $(el).attr('data-src');
             if (src && src.includes('pinimg.com') && !src.includes('avatar') && !src.includes('75x75')) {
@@ -439,7 +439,7 @@ async function handlePinterest(sock, msg, senderJid, chatId, texto) {
 
         const randomImg = images[Math.floor(Math.random() * images.length)];
         const imagenFinal = randomImg.replace(/\/\d+x\d+/, '/originals');
-        
+
         await sock.sendMessage(chatId, { 
             image: { url: imagenFinal }, 
             caption: formatearRespuesta(`📌 Pinterest: ${query}`)
@@ -465,13 +465,13 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
     }
 
     const [cancion, artista] = busqueda.split('-').map(s => s.trim());
-    
+
     try {
         const { data } = await axios.get(
             `https://lrclib.net/api/search?q=${encodeURIComponent(cancion + ' ' + artista)}`,
             { timeout: 10000 }
         );
-        
+
         if (!data || data.length === 0) {
             await sock.sendMessage(chatId, { 
                 text: formatearRespuesta('No encontré la letra de esa canción.') 
@@ -526,23 +526,49 @@ async function handleLetras(sock, msg, senderJid, chatId, texto) {
     }
 }
 
+// ==================== FUNCIONES DETECTADAS COMO FALTANTES (REPARADAS) ====================
+function esAdmin(jid) {
+    return ADMINS.includes(jid);
+}
+
+function estaBaneado(jid) {
+    return baneados.includes(jid);
+}
+
+function getCaption(message) {
+    if (!message) return '';
+    if (message.conversation) return message.conversation;
+    if (message.extendedTextMessage) return message.extendedTextMessage.text;
+    if (message.imageMessage) return message.imageMessage.caption;
+    if (message.videoMessage) return message.videoMessage.caption;
+    return '';
+}
+
+function formatearRespuesta(texto) {
+    // Si usabas un formateador especial podés cambiarlo acá, sino devuelve el texto limpio
+    return texto;
+}
+
+function limpiarRespuestaIA(texto) {
+    return texto.replace(/ia:/gi, '').trim();
+}
+
 // ==================== PROCESADOR DE MENSAJES ====================
 async function procesarMensaje(sock, msg) {
     try {
         const chatId = msg.key.remoteJid;
         const rawSender = msg.key.participant || msg.key.remoteJid;
         const senderJid = limpiarJid(rawSender);
-        
+
         const texto = getCaption(msg.message).trim();
         if (!texto || !texto.startsWith('/')) return;
-        
+
         const esGrupo = chatId.endsWith('@g.us');
-        
-        // 🚨 CONTROL DE PRIVACIDAD ESTRICTO: Solo el grupo permitido o admins por privado
+
+        // 🚨 CONTROL DE PRIVACIDAD: Solo el grupo permitido o admins por privado
         if (esGrupo && chatId !== GRUPO_PERMITIDO) return;
         if (!esGrupo && !esAdmin(senderJid)) return;
 
-        // Log en consola para ver en Render que el comando entró correctamente
         console.log(`[COMANDO DETECTADO] "${texto}" enviado por ${senderJid} en chat ${chatId}`);
 
         if (estaBaneado(senderJid) && !esAdmin(senderJid)) {
@@ -564,7 +590,7 @@ async function procesarMensaje(sock, msg) {
             case '/status':
                 await handleStatus(sock, msg, chatId, senderJid);
                 break;
-                
+
             case '/on':
             case '/off':
             case '/+18on':
@@ -573,27 +599,27 @@ async function procesarMensaje(sock, msg) {
             case '/modotrucadooff':
                 await handleToggle(sock, msg, chatId, senderJid, comandoLower.replace('/', ''));
                 break;
-                
+
             case '/ban':
                 await handleBan(sock, msg, chatId, senderJid, 'ban');
                 break;
-                
+
             case '/unban':
                 await handleBan(sock, msg, chatId, senderJid, 'unban');
                 break;
-                
+
             case '/ruleta':
                 await handleRuleta(sock, msg, senderJid, chatId, texto);
                 break;
-                
+
             case '/google':
                 await handleGoogle(sock, msg, senderJid, chatId, texto, false);
                 break;
-                
+
             case '/googlep':
                 await handleGoogle(sock, msg, senderJid, chatId, texto, true);
                 break;
-                
+
             case '/reddit':
                 if (comandoRaw === '/reddIt') {
                     await handleReddit(sock, msg, senderJid, chatId, texto, true);
@@ -601,11 +627,11 @@ async function procesarMensaje(sock, msg) {
                     await handleReddit(sock, msg, senderJid, chatId, texto, false);
                 }
                 break;
-                
+
             case '/pin':
                 await handlePinterest(sock, msg, senderJid, chatId, texto);
                 break;
-                
+
             case '/letras':
                 await handleLetras(sock, msg, senderJid, chatId, texto);
                 break;
@@ -615,12 +641,19 @@ async function procesarMensaje(sock, msg) {
     }
 }
 
-// ==================== CONEXIÓN BAILEYS ====================
+// ==================== CONEXIÓN BAILEYS + MONGODB ====================
 async function iniciarBot() {
     try {
-        const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-        const { version } = await fetchLatestBaileysVersion();
+        console.log("🗄️ Conectando a la base de datos MongoDB Atlas...");
+        const mongoClient = new MongoClient(process.env.MONGO_URI);
+        await mongoClient.connect();
+        const db = mongoClient.db("whatsapp_bot");
+        const collection = db.collection("session");
         
+        // Cargamos la sesión directo de la nube
+        const { state, saveCreds } = await useMongoDBAuthState(collection);
+        const { version } = await fetchLatestBaileysVersion();
+
         const sock = makeWASocket({
             version,
             auth: {
@@ -653,34 +686,34 @@ async function iniciarBot() {
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect } = update;
-            
+
             if (connection === 'open') {
                 console.log('[CONEXIÓN] ✅ Bot conectado exitosamente a WhatsApp');
                 pairingCodeRequested = false;
             }
-            
+
             if (connection === 'close') {
                 const shouldReconnect = (lastDisconnect?.error instanceof Boom) &&
                     (lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut);
-                
+
                 console.log('[CONEXIÓN] Cerrada. Reconectando en 5 segundos...');
                 if (shouldReconnect) {
                     pairingCodeRequested = false;
                     setTimeout(iniciarBot, 5000);
                 } else {
-                    console.log('[CONEXIÓN] Sesión inválida. Limpiando archivos...');
-                    try { fs.emptyDirSync(SESSION_DIR); } catch(e) {}
+                    console.log('[CONEXIÓN] Sesión cerrada voluntariamente. Deteniendo...');
                     process.exit(1);
                 }
             }
         });
 
+        // Guardar credenciales automáticamente en MongoDB cada vez que cambien
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             if (!msg.message || msg.key.fromMe) return;
-            
+
             procesarMensaje(sock, msg).catch(err => {
                 console.error('[ERROR MENSAJE]', err);
             });
