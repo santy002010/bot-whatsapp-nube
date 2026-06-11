@@ -693,21 +693,31 @@ async function iniciarBot() {
             }
 
             if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error instanceof Boom) &&
-                    (lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut);
+                // Detectamos el código de error de WhatsApp
+                const statusCode = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.statusCode;
+                console.log(`[CONEXIÓN] Cerrada. Razón/Código: ${statusCode}. Procesando reconexión...`);
 
-                console.log('[CONEXIÓN] Cerrada. Reconectando en 5 segundos...');
-                if (shouldReconnect) {
-                    pairingCodeRequested = false;
+                pairingCodeRequested = false;
+
+                if (statusCode === DisconnectReason.loggedOut) {
+                    // Si explícitamente se cerró la sesión desde el celular
+                    console.log('[CONEXIÓN] Sesión eliminada de WhatsApp. Limpiando base de datos para empezar de cero...');
+                    try {
+                        await collection.deleteMany({}); 
+                    } catch (err) {
+                        console.error('[ERROR LIMPIEZA]', err.message);
+                    }
                     setTimeout(iniciarBot, 5000);
                 } else {
-                    console.log('[CONEXIÓN] Sesión cerrada voluntariamente. Deteniendo...');
-                    process.exit(1);
+                    // Para cualquier otro error (red, timeout, o el rechazo por rate-limit de WhatsApp)
+                    // Esperamos 8 segundos y reintentamos internamente SIN apagar el proceso
+                    console.log('[CONEXIÓN] Desconexión temporal o rechazo de servidor. Reintentando en 8 segundos...');
+                    setTimeout(iniciarBot, 8000);
                 }
             }
         });
 
-        // Guardar credenciales automáticamente en MongoDB cada vez que cambien
+       // Guardar credenciales automáticamente en MongoDB cada vez que cambien
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('messages.upsert', async (m) => {
