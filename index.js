@@ -48,7 +48,7 @@ function saveBannedUsers(list) {
 }
 
 // ==========================================
-// 2. MOTOR DEL BOT Y LOGICA DE CONEXIÓN (100% PERMANENTE)
+// 2. MOTOR DEL BOT Y LOGICA DE CONEXIÓN
 // ==========================================
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -91,7 +91,6 @@ async function connectToWhatsApp() {
             const reason = lastDisconnect?.error?.output?.statusCode;
             console.log(`[SISTEMA] Conexión cerrada (Código: ${reason}). Reconectando...`);
             
-            // Si el corte es normal (caída de Render o red), reconecta usando la sesión guardada
             if (reason !== DisconnectReason.loggedOut) {
                 setTimeout(() => connectToWhatsApp(), 10000); 
             }
@@ -104,27 +103,26 @@ async function connectToWhatsApp() {
         }
     });
 
-    //     // ==========================================
+    // ==========================================
     // 3. INTERPRETACIÓN DE MENSAJES Y COMANDOS
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message) return; // ¡SOLUCIÓN! Quitamos el 'fromMe' de acá para que no te ignore
+            if (!msg.message) return; // Permitimos que pasen tus propios mensajes (fromMe)
 
             const from = msg.key.remoteJid;
             if (from !== ALLOWED_GROUP) return;
 
-            // Detectamos si el mensaje lo estás escribiendo vos desde el número del bot
+            // Detectamos si el comando viene de tu propio número (dueño de la sesión)
             const esMiPropioNumero = msg.key.fromMe;
-
             let sender = msg.key.participant || msg.key.remoteJid;
-            
-            // Si el texto no empieza con barra, no hace nada (evita bucles)
+
             const text = msg.message.conversation || 
                          msg.message.extendedTextMessage?.text || 
                          msg.message.imageMessage?.caption || '';
 
+            // Si no empieza con barra, salimos inmediatamente (evita bucles infinitos con las respuestas del bot)
             if (!text.startsWith('/')) return;
 
             const parts = text.split(' ');
@@ -132,7 +130,7 @@ async function connectToWhatsApp() {
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
 
-            // Si el mensaje es de tu propio número, sos ADMIN automático
+            // Si está en la lista de ADMINS o es tu propio número, sos Admin automático
             const isAdmin = ADMINS.includes(sender) || esMiPropioNumero;
             const bannedList = getBannedUsers();
 
@@ -198,6 +196,7 @@ async function connectToWhatsApp() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
+}
 
 // ==========================================
 // 4. LÓGICA DE LOS COMANDOS (FUNCIONES)
