@@ -47,7 +47,6 @@ function saveBannedUsers(list) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(list, null, 2));
 }
 
-// Limpia el JID de WhatsApp por si viene con ID de dispositivo vinculado (ej: :1@s.whatsapp.net)
 function parseJid(jid) {
     if (!jid) return '';
     return jid.split(':')[0] + '@s.whatsapp.net';
@@ -71,11 +70,10 @@ async function connectToWhatsApp() {
         version, 
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false, 
+        printQRInTerminal: true, // Cambiado a true por si necesitas ver logs de conexión
         browser: Browsers.ubuntu('Chrome') 
     });
 
-    // Inyección automática del prefijo [¡+!] en las respuestas
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -109,7 +107,7 @@ async function connectToWhatsApp() {
         }
     });
 
-    //     // ==========================================
+    // ==========================================
     // 3. INTERPRETACIÓN DE MENSAJES Y COMANDOS
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
@@ -118,16 +116,15 @@ async function connectToWhatsApp() {
             if (!msg.message) return; 
 
             const from = msg.key.remoteJid;
-            
-            // 👁️ AGREGÁ ESTA LÍNEA DE DEBUG ACÁ ABAJO:
+
+            // 👁️ SENSOR DE LOGS: Esto te va a mostrar en la consola de Render/Railway de dónde vienen los mensajes
             console.log(`[DEBUG] Mensaje recibido en: ${from} | ¿Es el grupo correcto?: ${from === ALLOWED_GROUP}`);
 
-
-            // Desempaquetar si el mensaje es efímero/temporal o ver una sola vez
+            // Desempaquetar el contenido del mensaje
             const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
             if (!messageContent) return;
 
-            const from = msg.key.remoteJid;
+            // Filtro estricto de grupo
             if (from !== ALLOWED_GROUP) return;
 
             const esMiPropioNumero = msg.key.fromMe;
@@ -151,7 +148,6 @@ async function connectToWhatsApp() {
             if (bannedList.includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
 
-            // --- COMANDOS DE ADMINISTRADOR ---
             if (isAdmin) {
                 if (command === '/status') { await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }); return; }
                 if (command === '/on') { botEnabled = true; await sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); return; }
@@ -181,7 +177,6 @@ async function connectToWhatsApp() {
                 }
             }
 
-            // --- INTERRUPTOR DE COMANDOS PÚBLICOS ---
             switch (command) {
                 case '/google':
                     await handleGoogle(sock, msg, from, args, false);
@@ -212,7 +207,7 @@ async function connectToWhatsApp() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
-} // <-- ¡Solucionado! Ahora la función principal se cierra correctamente acá.
+}
 
 // ==========================================
 // 4. LÓGICA DE LOS COMANDOS (FUNCIONES)
@@ -230,7 +225,6 @@ async function handleGoogle(sock, msg, from, args, usarPro = false) {
         return;
     }
     try {
-        // Modelos actualizados a la generación 2.0 para evitar caídas de servicio
         const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
         const res = await fetch(url, {
