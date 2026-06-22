@@ -15,9 +15,12 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// ==================== CONFIGURACIÓN GLOBAL ====================
+// ==================== CONFIGURACIÓN GLOBAL CORREGIDA ====================
 const GRUPO_PERMITIDO = '120363426591951143@g.us';
-const ADMIN_JIDS = ['5491128394646@s.whatsapp.net', '5491178972853@s.whatsapp.net'];
+const ADMIN_JIDS = [
+  '5491128394646@s.whatsapp.net', '541128394646@s.whatsapp.net',
+  '5491178972853@s.whatsapp.net', '541178972853@s.whatsapp.net'
+];
 const PREFIJO_MSJ = '[¡+!]\n';
 const PREFIJO_IA = '▼⁠・⁠ᴥ⁠·⁠▼\n\n';
 
@@ -253,22 +256,40 @@ async function connectToWhatsApp() {
   return sock;
 }
 
-// ==================== ANALIZADOR DE FLUJO Y MENSAJES ====================
+// ==================== ANALIZADOR DE FLUJO (CON LOGS DE DIAGNÓSTICO) ====================
 async function handleMessage(sock, msg) {
   try {
     if (!msg.message) return;
 
     const remoteJid = msg.key.remoteJid;
     const fromMe = msg.key.fromMe;
-    const senderJid = fromMe ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : msg.key.participant || msg.key.remoteJid;
     
+    // Extracción limpia de texto
     let text = '';
     if (msg.message.conversation) text = msg.message.conversation;
     else if (msg.message.extendedTextMessage) text = msg.message.extendedTextMessage.text || '';
     else if (msg.message.imageMessage && msg.message.imageMessage.caption) text = msg.message.imageMessage.caption;
 
-    if (remoteJid !== GRUPO_PERMITIDO) return;
+    // Si no es un comando, lo ignoramos rápido para no saturar la consola
     if (!text.startsWith('/')) return;
+
+    // FIX CRÍTICO: Limpieza de multidispositivo (:1, :2, etc.)
+    const rawSender = fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
+    const senderJid = rawSender.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+
+    // 🕵️‍♂️ LOG ESPÍA: Esto se va a ver en los logs de Render apenas tires un comando
+    console.log(`====== 📥 COMANDO DETECTADO ======`);
+    console.log(`📱 Grupo Actual:  ${remoteJid}`);
+    console.log(`🆔 Esperado:      ${GRUPO_PERMITIDO}`);
+    console.log(`👤 Quien envía:   ${senderJid}`);
+    console.log(`💬 Texto enviado: ${text}`);
+    console.log(`==================================`);
+
+    // Filtro de Grupo Estricto
+    if (remoteJid !== GRUPO_PERMITIDO) {
+      console.log(`⚠️ Comando ignorado: No coincide con el GRUPO_PERMITIDO.`);
+      return;
+    }
 
     const esAdmin = ADMIN_JIDS.includes(senderJid) || fromMe;
     if (baneadosData.baneados.includes(senderJid) && !esAdmin) return;
@@ -278,7 +299,7 @@ async function handleMessage(sock, msg) {
     const command = args[0].toLowerCase();
     const argumento = args.slice(1).join(' ');
 
-    // Enrutamiento directo y seguro sin dependencias circulares
+    // Enrutamiento directo
     if (command === '/status' && esAdmin) await cmdStatus(sock, remoteJid);
     else if (command === '/on' && esAdmin) await cmdToggleBot(sock, remoteJid, true);
     else if (command === '/off' && esAdmin) await cmdToggleBot(sock, remoteJid, false);
