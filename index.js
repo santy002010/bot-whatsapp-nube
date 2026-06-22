@@ -197,7 +197,11 @@ async function cmdRuleta(sock, jid, query) {
     await sock.sendMessage(jid, { text: Math.random() < probabilidad ? '🔴 si' : '⚫ no' });
   } catch (e) { console.error(e); }
 }
-// ==================== NÚCLEO DE CONEXIÓN (BAILEYS) ====================
+// ==================== NÚCLEO DE CONEXIÓN (MÉTODO CÓDIGO DE 8 CIFRAS) ====================
+
+// Número oficial asignado al bot
+const NUMERO_BOT = '5491128394646'; 
+
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_session_v3');
   let version = [2, 3000, 1017551063];
@@ -210,12 +214,34 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     version,
     auth: state,
-    printQRInTerminal: !fs.existsSync('./auth_session_v3/creds.json'),
-    browser: Browsers.ubuntu('Chrome'),
+    browser: Browsers.ubuntu('Chrome'), // Necesario para que simule una sesión web válida
     logger: pino({ level: 'silent' })
   });
 
-  // Interceptor global del prefijo [¡+!] usando inyección limpia
+  // GESTOR DEL CÓDIGO DE 8 CIFRAS
+  if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        let code = await sock.requestPairingCode(NUMERO_BOT.replace(/[^0-9]/g, ''));
+        code = code?.match(/.{1,4}/g)?.join('-') || code; 
+        console.log('==================================================');
+        console.log('🔑 ¡CÓDIGO DE VINCULACIÓN GENERADO CON ÉXITO! 🔑');
+        console.log(`👉 TU CÓDIGO ES:  ${code}  👈`);
+        console.log('==================================================');
+        console.log('Pasos para activarlo:');
+        console.log('1. Entrá a WhatsApp en tu celular.');
+        console.log('2. Ve a Configuración / Dispositivos vinculados.');
+        console.log('3. Tocá "Vincular un dispositivo".');
+        console.log('4. Abajo de todo, seleccioná "Vincular con el número de teléfono en su lugar".');
+        console.log(`5. Ingresá este código: ${code}`);
+        console.log('==================================================');
+      } catch (err) {
+        console.error('❌ Error al solicitar el código de 8 cifras:', err);
+      }
+    }, 3000);
+  }
+
+  // Interceptor global del prefijo [¡+!]
   const originalSendMessage = sock.sendMessage.bind(sock);
   sock.sendMessage = async function (jid, content, options = {}) {
     if (content && typeof content === 'object') {
@@ -232,6 +258,7 @@ async function connectToWhatsApp() {
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
+
     if (connection === 'close') {
       const reconnect = (lastDisconnect?.error instanceof Boom) ?
         lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut : true;
@@ -244,7 +271,7 @@ async function connectToWhatsApp() {
         process.exit(0);
       }
     } else if (connection === 'open') {
-      console.log('🚀 Bot conectado de forma segura a WhatsApp con entorno Axios.');
+      console.log('🚀 ¡BOT CONECTADO DE FORMA SEGURA A WHATSAPP VIA PAIRING CODE!');
     }
   });
 
@@ -256,7 +283,7 @@ async function connectToWhatsApp() {
   return sock;
 }
 
-// ==================== ANALIZADOR DE FLUJO (CON LOGS DE DIAGNÓSTICO) ====================
+// ==================== ANALIZADOR DE FLUJO ====================
 async function handleMessage(sock, msg) {
   try {
     if (!msg.message) return;
@@ -264,32 +291,19 @@ async function handleMessage(sock, msg) {
     const remoteJid = msg.key.remoteJid;
     const fromMe = msg.key.fromMe;
     
-    // Extracción limpia de texto
     let text = '';
     if (msg.message.conversation) text = msg.message.conversation;
     else if (msg.message.extendedTextMessage) text = msg.message.extendedTextMessage.text || '';
     else if (msg.message.imageMessage && msg.message.imageMessage.caption) text = msg.message.imageMessage.caption;
 
-    // Si no es un comando, lo ignoramos rápido para no saturar la consola
     if (!text.startsWith('/')) return;
 
-    // FIX CRÍTICO: Limpieza de multidispositivo (:1, :2, etc.)
     const rawSender = fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
     const senderJid = rawSender.split(':')[0].split('@')[0] + '@s.whatsapp.net';
 
-    // 🕵️‍♂️ LOG ESPÍA: Esto se va a ver en los logs de Render apenas tires un comando
-    console.log(`====== 📥 COMANDO DETECTADO ======`);
-    console.log(`📱 Grupo Actual:  ${remoteJid}`);
-    console.log(`🆔 Esperado:      ${GRUPO_PERMITIDO}`);
-    console.log(`👤 Quien envía:   ${senderJid}`);
-    console.log(`💬 Texto enviado: ${text}`);
-    console.log(`==================================`);
+    console.log(`📥 [Comando] de ${senderJid} en ${remoteJid}: ${text}`);
 
-    // Filtro de Grupo Estricto
-    if (remoteJid !== GRUPO_PERMITIDO) {
-      console.log(`⚠️ Comando ignorado: No coincide con el GRUPO_PERMITIDO.`);
-      return;
-    }
+    if (remoteJid !== GRUPO_PERMITIDO) return;
 
     const esAdmin = ADMIN_JIDS.includes(senderJid) || fromMe;
     if (baneadosData.baneados.includes(senderJid) && !esAdmin) return;
@@ -299,7 +313,6 @@ async function handleMessage(sock, msg) {
     const command = args[0].toLowerCase();
     const argumento = args.slice(1).join(' ');
 
-    // Enrutamiento directo
     if (command === '/status' && esAdmin) await cmdStatus(sock, remoteJid);
     else if (command === '/on' && esAdmin) await cmdToggleBot(sock, remoteJid, true);
     else if (command === '/off' && esAdmin) await cmdToggleBot(sock, remoteJid, false);
@@ -322,7 +335,7 @@ async function handleMessage(sock, msg) {
 // ==================== EXPRESS KEEPALIVE FOR RENDER ====================
 const app = express();
 const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Motor del Bot de WhatsApp en línea con todas sus dependencias.'));
+app.get('/', (req, res) => res.send('Motor del Bot activo.'));
 app.listen(PORT, () => console.log(`Puerto Express activo: ${PORT}`));
 
 connectToWhatsApp().catch(err => {
