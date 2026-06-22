@@ -23,9 +23,10 @@ let nsfwEnabled = false;
 let modoTrucado = false;
 let baneadosData = { baneados: [] };
 
-// ==================== NÚCLEO DE CONEXIÓN (MÉTODO 8 CIFRAS) ====================
+// ==================== NÚCLEO DE CONEXIÓN (CON DISCO PERSISTENTE) ====================
 async function connectToWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState('./auth_session_v3');
+  // CORRECCIÓN: Volvemos a usar 'baileys_auth_info' para enlazar con tu disco de Render
+  const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
   let version = [2, 3000, 1017551063];
 
   try {
@@ -42,7 +43,7 @@ async function connectToWhatsApp() {
     logger: pino({ level: 'silent' })
   });
 
-  // Generador automático del código de 8 cifras directamente en la consola de Render
+  // Solo generará código si por alguna razón el disco de Render estuviera vacío
   if (!sock.authState.creds.registered) {
     setTimeout(async () => {
       try {
@@ -82,7 +83,7 @@ async function connectToWhatsApp() {
         process.exit(0);
       }
     } else if (connection === 'open') {
-      console.log('🚀 ¡BOT CONECTADO DE FORMA SEGURA A WHATSAPP VIA PAIRING CODE!');
+      console.log('🚀 ¡BOT CONECTADO DE FORMA SEGURA A WHATSAPP!');
     }
   });
 
@@ -96,12 +97,10 @@ async function connectToWhatsApp() {
 
 // ==================== CONTROLADORES DE COMANDOS REALES ====================
 
-// /status limpio sin mención de IA
 async function cmdStatus(sock, jid) {
   await sock.sendMessage(jid, { text: '¡Bot activo y operando al 100%! 🚀' });
 }
 
-// /test para autoevaluar servicios externos usando solo Axios
 async function cmdTest(sock, jid) {
   await sock.sendMessage(jid, { text: '🧪 *Iniciando test estructural de comandos...*' });
   let reporte = '📊 *REPORTE DE DIAGNÓSTICO EN VIVO* 📊\n\n';
@@ -143,7 +142,6 @@ async function cmdTest(sock, jid) {
   await sock.sendMessage(jid, { text: reporte });
 }
 
-// /google y /googlep nativos mediante Axios directo (Evita caídas de módulos)
 async function cmdGoogle(sock, jid, query, mode) {
   try {
     if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ Introduce una consulta o pregunta.' });
@@ -164,12 +162,11 @@ async function cmdGoogle(sock, jid, query, mode) {
   }
 }
 
-// /letras ultra estable y camuflado contra bloqueos
 async function cmdLetras(sock, jid, query) {
   try {
     if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ Especificá la canción.' });
     const response = await axios.get(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
       timeout: 10000
     });
     const data = response.data;
@@ -186,7 +183,6 @@ async function cmdLetras(sock, jid, query) {
   }
 }
 
-// /pin extractor real de imágenes aleatorias desde Pinterest
 async function cmdPin(sock, jid, query) {
   try {
     if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ ¿Qué querés buscar en Pinterest?' });
@@ -204,7 +200,6 @@ async function cmdPin(sock, jid, query) {
   }
 }
 
-// /reddit extractor automatizado de posts con imágenes filtrado por NSFW
 async function cmdReddit(sock, jid, query) {
   try {
     const subreddit = query?.trim() ? query.trim() : 'funny';
@@ -231,7 +226,6 @@ async function cmdReddit(sock, jid, query) {
   }
 }
 
-// /ban y /unban estructural interactuando por mención o respuesta de mensaje
 async function cmdBanUser(sock, jid, msg) {
   try {
     const mention = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || 
@@ -254,7 +248,6 @@ async function cmdUnbanUser(sock, jid, msg) {
   } catch (e) { await sock.sendMessage(jid, { text: '❌ Error al ejecutar comando.' }); }
 }
 
-// Comandos de Estado de Configuración de memoria dinámica
 async function cmdToggleBot(sock, jid, state) { botEnabled = state; await sock.sendMessage(jid, { text: `Bot ${state ? 'ENCENDIDO 🟢' : 'APAGADO 🔴'}` }); }
 async function cmdToggleNsfw(sock, jid, state) { nsfwEnabled = state; await sock.sendMessage(jid, { text: `Modo +18 ${state ? 'ACTIVADO 🔞' : 'DESACTIVADO 🛡️'}` }); }
 async function cmdToggleTrucado(sock, jid, state) { modoTrucado = state; await sock.sendMessage(jid, { text: `Modo Trucado ${state ? 'ACTIVADO ⚡' : 'DESACTIVADO ❌'}` }); }
@@ -280,7 +273,7 @@ async function handleMessage(sock, msg) {
 
     console.log(`📥 [Comando] de ${senderJid} en ${remoteJid}: ${text}`);
 
-    // Habilitación de ejecución: Responderá en el grupo asignado O en cualquier chat privado (incluso el tuyo propio)
+    // Habilitación de ejecución: Responderá en el grupo asignado O en cualquier chat privado
     const esChatPrivado = remoteJid.endsWith('@s.whatsapp.net');
     if (remoteJid !== GRUPO_PERMITIDO && !esChatPrivado) return;
 
