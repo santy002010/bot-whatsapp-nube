@@ -109,13 +109,19 @@ async function connectToWhatsApp() {
         }
     });
 
-    // ==========================================
+    //     // ==========================================
     // 3. INTERPRETACIÓN DE MENSAJES Y COMANDOS
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
             if (!msg.message) return; 
+
+            const from = msg.key.remoteJid;
+            
+            // 👁️ AGREGÁ ESTA LÍNEA DE DEBUG ACÁ ABAJO:
+            console.log(`[DEBUG] Mensaje recibido en: ${from} | ¿Es el grupo correcto?: ${from === ALLOWED_GROUP}`);
+
 
             // Desempaquetar si el mensaje es efímero/temporal o ver una sola vez
             const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
