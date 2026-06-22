@@ -47,6 +47,12 @@ function saveBannedUsers(list) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(list, null, 2));
 }
 
+// Limpia el JID de WhatsApp por si viene con ID de dispositivo vinculado (ej: :1@s.whatsapp.net)
+function parseJid(jid) {
+    if (!jid) return '';
+    return jid.split(':')[0] + '@s.whatsapp.net';
+}
+
 // ==========================================
 // 2. MOTOR DEL BOT Y LOGICA DE CONEXIÓN
 // ==========================================
@@ -69,7 +75,7 @@ async function connectToWhatsApp() {
         browser: Browsers.ubuntu('Chrome') 
     });
 
-    // Inyección automática del prefijo [¡+!]
+    // Inyección automática del prefijo [¡+!] en las respuestas
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -109,20 +115,23 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
-            if (!msg.message) return; // Permitimos que pasen tus propios mensajes (fromMe)
+            if (!msg.message) return; 
+
+            // Desempaquetar si el mensaje es efímero/temporal o ver una sola vez
+            const messageContent = msg.message.ephemeralMessage?.message || msg.message.viewOnceMessage?.message || msg.message;
+            if (!messageContent) return;
 
             const from = msg.key.remoteJid;
             if (from !== ALLOWED_GROUP) return;
 
-            // Detectamos si el comando viene de tu propio número (dueño de la sesión)
             const esMiPropioNumero = msg.key.fromMe;
-            let sender = msg.key.participant || msg.key.remoteJid;
+            let rawSender = msg.key.participant || msg.key.remoteJid;
+            let sender = parseJid(rawSender);
+            
+            const text = messageContent.conversation || 
+                         messageContent.extendedTextMessage?.text || 
+                         messageContent.imageMessage?.caption || '';
 
-            const text = msg.message.conversation || 
-                         msg.message.extendedTextMessage?.text || 
-                         msg.message.imageMessage?.caption || '';
-
-            // Si no empieza con barra, salimos inmediatamente (evita bucles infinitos con las respuestas del bot)
             if (!text.startsWith('/')) return;
 
             const parts = text.split(' ');
@@ -130,9 +139,8 @@ async function connectToWhatsApp() {
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
 
-            // Si está en la lista de ADMINS o es tu propio número, sos Admin automático
             const isAdmin = ADMINS.includes(sender) || esMiPropioNumero;
-            const bannedList = getBannedUsers();
+            const bannedList = getBannedUsers().map(id => parseJid(id));
 
             if (bannedList.includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
@@ -148,16 +156,18 @@ async function connectToWhatsApp() {
                 if (command === '/modotrucadooff') { modoTrucado = false; await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); return; }
 
                 if (command === '/ban' || command === '/unban') {
-                    const target = msg.message.extendedTextMessage?.contextInfo?.participant;
-                    if (!target) { await sock.sendMessage(from, { text: '⚠️ Debes citar un mensaje.' }, { quoted: msg }); return; }
+                    const rawTarget = messageContent.extendedTextMessage?.contextInfo?.participant;
+                    if (!rawTarget) { await sock.sendMessage(from, { text: '⚠️ Debes citar un mensaje.' }, { quoted: msg }); return; }
+                    
+                    const target = parseJid(rawTarget);
                     if (command === '/ban' && ADMINS.includes(target)) { await sock.sendMessage(from, { text: '❌ No puedes banear a un admin.' }, { quoted: msg }); return; }
 
                     let list = getBannedUsers();
-                    if (command === '/ban' && !list.includes(target)) {
+                    if (command === '/ban' && !list.map(id => parseJid(id)).includes(target)) {
                         list.push(target);
                         await sock.sendMessage(from, { text: `🚫 Baneado.` }, { quoted: msg });
-                    } else if (command === '/unban' && list.includes(target)) {
-                        list = list.filter(id => id !== target);
+                    } else if (command === '/unban' && list.map(id => parseJid(id)).includes(target)) {
+                        list = list.filter(id => parseJid(id) !== target);
                         await sock.sendMessage(from, { text: `✅ Desbaneado.` }, { quoted: msg });
                     }
                     saveBannedUsers(list);
@@ -196,7 +206,7 @@ async function connectToWhatsApp() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
-}
+} // <-- ¡Solucionado! Ahora la función principal se cierra correctamente acá.
 
 // ==========================================
 // 4. LÓGICA DE LOS COMANDOS (FUNCIONES)
@@ -214,7 +224,8 @@ async function handleGoogle(sock, msg, from, args, usarPro = false) {
         return;
     }
     try {
-        const modelo = usarPro ? 'gemini-1.5-pro' : 'gemini-1.5-flash';
+        // Modelos actualizados a la generación 2.0 para evitar caídas de servicio
+        const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
         const res = await fetch(url, {
             method: 'POST',
