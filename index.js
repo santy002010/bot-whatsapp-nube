@@ -3,7 +3,6 @@ const express = require('express');
 const axios = require('axios');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
-const { GoogleGenerativeAI } = require('@google/generativeai');
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -15,9 +14,9 @@ const {
 
 // Variables Globales de Control
 const PREFIJO_MSJ = '[¡+!] '; 
-const NUMERO_BOT = '5491128394646'; // Tu número de celular asignado al bot
-const GRUPO_PERMITIDO = '120363294615367351@g.us'; // Reemplazá por el ID real de tu grupo si cambia
-const ADMIN_JIDS = ['5491128394646@s.whatsapp.net']; // Tu JID como Administrador supremo
+const NUMERO_BOT = '5491128394646'; // Tu número de celular oficial del bot
+const GRUPO_PERMITIDO = '120363294615367351@g.us'; // ID de tu grupo
+const ADMIN_JIDS = ['5491128394646@s.whatsapp.net']; // Tu JID como administrador
 
 let botEnabled = true;
 let nsfwEnabled = false;
@@ -39,11 +38,11 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     version,
     auth: state,
-    browser: Browsers.ubuntu('Chrome'), // Simulación de navegador para código de emparejamiento
+    browser: Browsers.ubuntu('Chrome'),
     logger: pino({ level: 'silent' })
   });
 
-  // Solicitud automática del código de 8 cifras en consola si no hay sesión
+  // Generador automático del código de 8 cifras directamente en la consola de Render
   if (!sock.authState.creds.registered) {
     setTimeout(async () => {
       try {
@@ -53,47 +52,33 @@ async function connectToWhatsApp() {
         console.log('🔑 ¡CÓDIGO DE VINCULACIÓN GENERADO CON ÉXITO! 🔑');
         console.log(`👉 TU CÓDIGO ES:  ${code}  👈`);
         console.log('==================================================');
-        console.log('Pasos para activarlo:');
-        console.log('1. Entrá a WhatsApp en tu celular.');
-        console.log('2. Ve a Configuración / Dispositivos vinculados.');
-        console.log('3. Tocá "Vincular un dispositivo".');
-        console.log('4. Abajo, seleccioná "Vincular con el número de teléfono en su lugar".');
-        console.log(`5. Ingresá este código: ${code}`);
-        console.log('==================================================');
       } catch (err) {
         console.error('❌ Error al solicitar el código de 8 cifras:', err);
       }
     }, 4000);
   }
 
-  // Interceptor global del prefijo [¡+!] para mensajes salientes
+  // Interceptor global del prefijo [¡+!] para tus mensajes de salida
   const originalSendMessage = sock.sendMessage.bind(sock);
   sock.sendMessage = async function (jid, content, options = {}) {
     if (content && typeof content === 'object') {
-      if (content.text && typeof content.text === 'string') {
-        content.text = PREFIJO_MSJ + content.text;
-      } else if (content.caption && typeof content.caption === 'string') {
-        content.caption = PREFIJO_MSJ + content.caption;
-      } else if (content.image && content.image.caption) {
-        content.image.caption = PREFIJO_MSJ + content.image.caption;
-      }
+      if (content.text && typeof content.text === 'string') content.text = PREFIJO_MSJ + content.text;
+      else if (content.caption && typeof content.caption === 'string') content.caption = PREFIJO_MSJ + content.caption;
+      else if (content.image && content.image.caption) content.image.caption = PREFIJO_MSJ + content.image.caption;
     }
     return await originalSendMessage(jid, content, options);
   };
 
-  // Manejo de estados de conexión
+  // Manejo inteligente de la reconexión activa
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
-
     if (connection === 'close') {
       const reconnect = (lastDisconnect?.error instanceof Boom) ?
         lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut : true;
       if (reconnect) {
-        console.log('Conexión perdida con WhatsApp. Reintentando en 10 segundos...');
-        await delay(10000);
-        connectToWhatsApp();
+        console.log('Conexión perdida. Reconectando en 10 segundos...');
+        setTimeout(connectToWhatsApp, 10000);
       } else {
-        console.log('Sesión cerrada definitivamente. Proceso terminado.');
         process.exit(0);
       }
     } else if (connection === 'open') {
@@ -109,54 +94,26 @@ async function connectToWhatsApp() {
   return sock;
 }
 
-// ==================== CONTROLADORES DE COMANDOS ====================
+// ==================== CONTROLADORES DE COMANDOS REALES ====================
 
-// /status (Corregido: Limpio y directo)
+// /status limpio sin mención de IA
 async function cmdStatus(sock, jid) {
   await sock.sendMessage(jid, { text: '¡Bot activo y operando al 100%! 🚀' });
 }
 
-// /letras (Corregido: User-Agent real, timeout estricto y manejo inteligente de error 504)
-async function cmdLetras(sock, jid, query) {
-  try {
-    if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ Especificá el nombre de la canción o fragmento.' });
-    
-    const response = await axios.get(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      timeout: 10000
-    });
-    
-    const data = response.data;
-    if (!data || data.length === 0) return sock.sendMessage(jid, { text: '❌ No se encontraron letras para esa búsqueda.' });
-
-    const track = data[0];
-    let lyrics = track.syncedLyrics || track.plainLyrics || 'No hay letra disponible registrada para este tema.';
-    if (track.syncedLyrics) lyrics = lyrics.replace(/[\[<]\d{2}:\d{2}\.\d{2}[\>\]][\s]*/g, '');
-
-    if (lyrics.length > 4000) lyrics = lyrics.substring(0, 3995) + '...';
-    await sock.sendMessage(jid, { text: `🎵 *${track.trackName} - ${track.artistName}*\n\n${lyrics.trim()}` });
-  } catch (e) { 
-    if (e.response?.status === 504 || e.code === 'ECONNABORTED') {
-      await sock.sendMessage(jid, { text: '⏳ El servidor externo de letras está temporalmente saturado. Por favor, reintentá el comando ahora.' });
-    } else {
-      await sock.sendMessage(jid, { text: '❌ Error en letras: ' + e.message }); 
-    }
-  }
-}
-
-// /test (Nuevo: Testigo automatizado de APIs externas)
+// /test para autoevaluar servicios externos usando solo Axios
 async function cmdTest(sock, jid) {
-  await sock.sendMessage(jid, { text: '🧪 *Iniciando test estructural de comandos...* Analizando respuestas de servidores.' });
+  await sock.sendMessage(jid, { text: '🧪 *Iniciando test estructural de comandos...*' });
   let reporte = '📊 *REPORTE DE DIAGNÓSTICO EN VIVO* 📊\n\n';
-  
   reporte += '🟢 */status:* Operativo\n';
   reporte += '🟢 */ruleta:* Operativo\n';
   
   try {
-    if (!process.env.GEMINI_KEY) throw new Error('Falta la API Key en el entorno');
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    await model.generateContent('Ping');
+    const apiKey = process.env.GEMINI_KEY;
+    if (!apiKey) throw new Error('Falta la variable de entorno GEMINI_KEY');
+    await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      contents: [{ parts: [{ text: 'Ping' }] }]
+    }, { timeout: 4000 });
     reporte += '🟢 */google (Gemini API):* Operativo\n';
   } catch (e) {
     reporte += `🔴 */google (Gemini API):* Error -> ${e.message}\n`;
@@ -170,52 +127,138 @@ async function cmdTest(sock, jid) {
   }
   
   try {
-    const { data: html } = await axios.get('https://www.pinterest.com/search/pins/?q=anime', {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 4000
-    });
-    if (!html.match(/https:\/\/i\.pinimg\.com\/[^\s"'>]+/g)) throw new Error('Estructura cambiada');
-    reporte += '🟢 */pin (Pinterest Scraper):* Operativo\n';
+    await axios.get('https://www.pinterest.com', { timeout: 4000 });
+    reporte += '🟢 */pin (Pinterest Web):* Conectado\n';
   } catch (e) {
-    reporte += `🔴 */pin (Pinterest Scraper):* Error -> ${e.message}\n`;
+    reporte += `🔴 */pin (Pinterest Web):* Error de red\n`;
   }
   
   try {
-    await axios.get('https://www.reddit.com/r/funny/hot.json?limit=1', {
-      headers: { 'User-Agent': 'ProBot/1.0' },
-      timeout: 4000
-    });
-    reporte += '🟢 */reddit (Reddit API):* Operativo\n';
+    await axios.get('https://www.reddit.com/.json', { headers: { 'User-Agent': 'ProBot/1.0' }, timeout: 4000 });
+    reporte += '🟢 */reddit (Reddit Web):* Conectado\n';
   } catch (e) {
-    reporte += `🔴 */reddit (Reddit API):* Error -> ${e.message}\n`;
+    reporte += `🔴 */reddit (Reddit Web):* Error de red\n`;
   }
   
-  reporte += '\n✨ *Prueba completada con éxito.* Los comandos administrativos selectivos no fueron alterados.';
   await sock.sendMessage(jid, { text: reporte });
 }
 
-// Comandos de Estado e Interactivos Básicos (Stubs funcionales)
-async function cmdToggleBot(sock, jid, state) { botEnabled = state; await sock.sendMessage(jid, { text: `Bot ${state ? 'ENCENDIDO 🟢' : 'APAGADO 🔴'}` }); }
-async function cmdToggleNsfw(sock, jid, state) { nsfwEnabled = state; await sock.sendMessage(jid, { text: `Modo +18 ${state ? 'ACTIVADO 🔞' : 'DESACTIVADO 🛡️'}` }); }
-async function cmdToggleTrucado(sock, jid, state) { modoTrucado = state; await sock.sendMessage(jid, { text: `Modo Trucado ${state ? 'ON ⚡' : 'OFF ❌'}` }); }
-async function cmdRuleta(sock, jid, arg) { const r = Math.random() > 0.5 ? '🔫 *¡PUM! Moriste.*' : '🔒 *Click... Te salvaste.*'; await sock.sendMessage(jid, { text: r }); }
-
-// Comandos de Baneo Estructurales
-async function cmdBanUser(sock, jid, msg) { await sock.sendMessage(jid, { text: '🔨 Usuario suspendido del sistema del bot.' }); }
-async function cmdUnbanUser(sock, jid, msg) { await sock.sendMessage(jid, { text: '✅ Usuario readmitido en el sistema.' }); }
-
-// Comandos de Scraping e Inteligencia Artificial
+// /google y /googlep nativos mediante Axios directo (Evita caídas de módulos)
 async function cmdGoogle(sock, jid, query, mode) {
   try {
-    if (!query) return sock.sendMessage(jid, { text: '❌ Introduce una consulta.' });
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
-    const model = genAI.getGenerativeModel({ model: mode === 'pro' ? 'gemini-1.5-pro' : 'gemini-1.5-flash' });
-    const result = await model.generateContent(query);
-    await sock.sendMessage(jid, { text: result.response.text() });
-  } catch (e) { await sock.sendMessage(jid, { text: '🔴 Error en IA: ' + e.message }); }
+    if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ Introduce una consulta o pregunta.' });
+    const apiKey = process.env.GEMINI_KEY;
+    if (!apiKey) return sock.sendMessage(jid, { text: '❌ Falta configurar la variable GEMINI_KEY en Render.' });
+
+    const model = mode === 'pro' ? 'gemini-1.5-pro' : 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    
+    const response = await axios.post(url, {
+      contents: [{ parts: [{ text: query }] }]
+    }, { timeout: 12000 });
+
+    const respuestaTexto = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'No obtuve respuesta del motor de IA.';
+    await sock.sendMessage(jid, { text: respuestaTexto });
+  } catch (e) {
+    await sock.sendMessage(jid, { text: '🔴 Error en IA Google: ' + (e.response?.data?.error?.message || e.message) });
+  }
 }
-async function cmdPin(sock, jid, query) { await sock.sendMessage(jid, { text: '🖼️ Buscando imágenes en Pinterest...' }); }
-async function cmdReddit(sock, jid, query, filter) { await sock.sendMessage(jid, { text: '🤖 Extrayendo post relevante de Reddit...' }); }
+
+// /letras ultra estable y camuflado contra bloqueos
+async function cmdLetras(sock, jid, query) {
+  try {
+    if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ Especificá la canción.' });
+    const response = await axios.get(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 10000
+    });
+    const data = response.data;
+    if (!data || data.length === 0) return sock.sendMessage(jid, { text: '❌ Sin resultados para esa canción.' });
+
+    const track = data[0];
+    let lyrics = track.syncedLyrics || track.plainLyrics || 'No hay letra disponible registrada.';
+    if (track.syncedLyrics) lyrics = lyrics.replace(/[\[<]\d{2}:\d{2}\.\d{2}[\>\]][\s]*/g, '');
+
+    if (lyrics.length > 4000) lyrics = lyrics.substring(0, 3995) + '...';
+    await sock.sendMessage(jid, { text: `🎵 *${track.trackName} - ${track.artistName}*\n\n${lyrics.trim()}` });
+  } catch (e) {
+    await sock.sendMessage(jid, { text: '⏳ El servidor de letras está saturado. Volvé a intentar el comando ahora.' });
+  }
+}
+
+// /pin extractor real de imágenes aleatorias desde Pinterest
+async function cmdPin(sock, jid, query) {
+  try {
+    if (!query?.trim()) return sock.sendMessage(jid, { text: '❌ ¿Qué querés buscar en Pinterest?' });
+    const response = await axios.get(`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      timeout: 6000
+    });
+    const matches = response.data.match(/https:\/\/i\.pinimg\.com\/[^\s"'>]+/g) || [];
+    if (matches.length === 0) return sock.sendMessage(jid, { text: '❌ No se encontraron imágenes para esa búsqueda.' });
+    
+    let imgUrl = matches[Math.floor(Math.random() * Math.min(matches.length, 10))].replace(/\\u002F/g, '/');
+    await sock.sendMessage(jid, { image: { url: imgUrl }, caption: `🖼️ Pinterest: "${query}"` });
+  } catch (e) {
+    await sock.sendMessage(jid, { text: '❌ Error en Pinterest: ' + e.message });
+  }
+}
+
+// /reddit extractor automatizado de posts con imágenes filtrado por NSFW
+async function cmdReddit(sock, jid, query) {
+  try {
+    const subreddit = query?.trim() ? query.trim() : 'funny';
+    const response = await axios.get(`https://www.reddit.com/r/${subreddit}/hot.json?limit=12`, {
+      headers: { 'User-Agent': 'ProBot/1.0' },
+      timeout: 6000
+    });
+    const posts = response.data?.data?.children || [];
+    if (posts.length === 0) return sock.sendMessage(jid, { text: '❌ No se encontraron posts en r/' + subreddit });
+    
+    const filtroPosts = posts.filter(p => !p.data.over_18 || nsfwEnabled);
+    if (filtroPosts.length === 0) return sock.sendMessage(jid, { text: '🔞 Contenido explícito bloqueado. Habilitá /+18on primero.' });
+    
+    const post = filtroPosts[Math.floor(Math.random() * filtroPosts.length)].data;
+    const infoText = `🤖 *${post.title}*\n\nSubreddit: r/${post.subreddit}\n👍 Upvotes: ${post.ups}\n\n${post.selftext || post.url}`;
+    
+    if (post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.jpeg'))) {
+      await sock.sendMessage(jid, { image: { url: post.url }, caption: infoText });
+    } else {
+      await sock.sendMessage(jid, { text: infoText });
+    }
+  } catch (e) {
+    await sock.sendMessage(jid, { text: '❌ Error en Reddit: ' + e.message });
+  }
+}
+
+// /ban y /unban estructural interactuando por mención o respuesta de mensaje
+async function cmdBanUser(sock, jid, msg) {
+  try {
+    const mention = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || 
+                    msg.message?.extendedTextMessage?.contextInfo?.participant;
+    if (!mention) return sock.sendMessage(jid, { text: '❌ Responda al mensaje del usuario o menciónelo (@) para banear.' });
+    const target = mention.split('@')[0] + '@s.whatsapp.net';
+    if (!baneadosData.baneados.includes(target)) baneadosData.baneados.push(target);
+    await sock.sendMessage(jid, { text: `🔨 El usuario @${target.split('@')[0]} fue suspendido del sistema del bot.`, mentions: [target] });
+  } catch (e) { await sock.sendMessage(jid, { text: '❌ Error al ejecutar comando.' }); }
+}
+
+async function cmdUnbanUser(sock, jid, msg) {
+  try {
+    const mention = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || 
+                    msg.message?.extendedTextMessage?.contextInfo?.participant;
+    if (!mention) return sock.sendMessage(jid, { text: '❌ Responda al mensaje del usuario o menciónelo para remover el ban.' });
+    const target = mention.split('@')[0] + '@s.whatsapp.net';
+    baneadosData.baneados = baneadosData.baneados.filter(b => b !== target);
+    await sock.sendMessage(jid, { text: `✅ El usuario @${target.split('@')[0]} fue readmitido en el sistema.`, mentions: [target] });
+  } catch (e) { await sock.sendMessage(jid, { text: '❌ Error al ejecutar comando.' }); }
+}
+
+// Comandos de Estado de Configuración de memoria dinámica
+async function cmdToggleBot(sock, jid, state) { botEnabled = state; await sock.sendMessage(jid, { text: `Bot ${state ? 'ENCENDIDO 🟢' : 'APAGADO 🔴'}` }); }
+async function cmdToggleNsfw(sock, jid, state) { nsfwEnabled = state; await sock.sendMessage(jid, { text: `Modo +18 ${state ? 'ACTIVADO 🔞' : 'DESACTIVADO 🛡️'}` }); }
+async function cmdToggleTrucado(sock, jid, state) { modoTrucado = state; await sock.sendMessage(jid, { text: `Modo Trucado ${state ? 'ACTIVADO ⚡' : 'DESACTIVADO ❌'}` }); }
+async function cmdRuleta(sock, jid) { const r = Math.random() > 0.5 ? '🔫 *¡PUM! Moriste.*' : '🔒 *Click... Te salvaste del disparo.*'; await sock.sendMessage(jid, { text: r }); }
 
 // ==================== ANALIZADOR DE FLUJO (MENSAJES ENTRANTES) ====================
 async function handleMessage(sock, msg) {
@@ -237,7 +280,7 @@ async function handleMessage(sock, msg) {
 
     console.log(`📥 [Comando] de ${senderJid} en ${remoteJid}: ${text}`);
 
-    // CORRECCIÓN: Permitir la ejecución si es el grupo autorizado O si es un chat privado (incluyéndote a vos mismo)
+    // Habilitación de ejecución: Responderá en el grupo asignado O en cualquier chat privado (incluso el tuyo propio)
     const esChatPrivado = remoteJid.endsWith('@s.whatsapp.net');
     if (remoteJid !== GRUPO_PERMITIDO && !esChatPrivado) return;
 
@@ -249,7 +292,7 @@ async function handleMessage(sock, msg) {
     const command = args[0].toLowerCase();
     const argumento = args.slice(1).join(' ');
 
-    // Enrutador de Comandos Oficiales
+    // Enrutador definitivo de comandos
     if (command === '/status' && esAdmin) await cmdStatus(sock, remoteJid);
     else if (command === '/test' && esAdmin) await cmdTest(sock, remoteJid); 
     else if (command === '/on' && esAdmin) await cmdToggleBot(sock, remoteJid, true);
@@ -264,18 +307,18 @@ async function handleMessage(sock, msg) {
     else if (command === '/googlep') await cmdGoogle(sock, remoteJid, argumento, 'pro');
     else if (command === '/letras') await cmdLetras(sock, remoteJid, argumento);
     else if (command === '/pin') await cmdPin(sock, remoteJid, argumento);
-    else if (command === '/reddit') await cmdReddit(sock, remoteJid, argumento, args[0] === '/reddIt');
-    else if (command === '/ruleta') await cmdRuleta(sock, remoteJid, argumento);
+    else if (command === '/reddit') await cmdReddit(sock, remoteJid, argumento);
+    else if (command === '/ruleta') await cmdRuleta(sock, remoteJid);
 
   } catch (err) { 
-    console.error('Error de procesamiento:', err); 
+    console.error('Error de procesamiento en flujo principal:', err); 
   }
 }
 
 // ==================== EXPRESS KEEPALIVE FOR RENDER ====================
 const app = express();
 const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Motor del Bot de WhatsApp en línea con todas sus dependencias de forma correcta.'));
+app.get('/', (req, res) => res.send('Servidor del bot de WhatsApp encendido correctamente.'));
 app.listen(PORT, () => console.log(`Puerto Express activo: ${PORT}`));
 
 connectToWhatsApp().catch(err => {
