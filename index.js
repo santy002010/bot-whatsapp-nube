@@ -13,7 +13,7 @@ const {
 // ==========================================
 // 1. CONFIGURACIÓN DEL SERVIDOR Y ESTADO
 // ==========================================
-const app = report = express();
+const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get('/', (req, res) => {
@@ -48,6 +48,18 @@ function saveBannedUsers(list) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(list, null, 2));
 }
 
+// Cabeceras avanzadas de simulación para evitar bloqueos 403
+const REAL_BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+};
+
 // ==========================================
 // 2. FUNCIONES MODULARES (COMANDOS)
 // ==========================================
@@ -63,9 +75,8 @@ async function handleGoogle(sock, from, msg, args, usarPro = false) {
         const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
         
-        // 🌟 INSTRUCCIONES ESTRICTAS PARA TRADUCIR A FORMATO WHATSAPP LIMPIO
         const sistemaPrompt = `REGLAS OBLIGATORIAS DE RESPUESTA:
-1. Actúa como una persona normal respondiendo un mensaje.
+1. Actúa como una persona normal respondiendo un mensaje de texto.
 2. NUNCA digas que sos una IA, un bot, un modelo de lenguaje, ni menciones a Google.
 3. FORMATO WHATSAPP LIMPIO: No uses títulos con '#' o '##'. No uses bloques de código con tres comillas (\`\`\`). No uses listas con guiones largos o símbolos raros de Markdown que se rompen en celulares.
 4. Si querés resaltar algo, usá ÚNICAMENTE el asterisco para poner texto en *negrita* de WhatsApp. El resto tiene que ser texto plano, fluido, legible y directo.
@@ -77,13 +88,17 @@ Consulta del usuario: ${args}`;
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: sistemaPrompt }] }] })
         });
-        const json = await res.json();
 
+        // Capturar saturación de API de Google
+        if (res.status === 429) {
+            return await sock.sendMessage(from, { text: '⚠️ *Error Gemini (429):* Google está rechazando los mensajes temporalmente por exceso de uso en la Key gratuita. Esperá un minuto.' }, { quoted: msg });
+        }
+
+        const json = await res.json();
         if (json.error) throw new Error(json.error.message);
         let text = json.candidates[0]?.content?.parts?.[0]?.text;
         
         if (text) {
-            // Limpieza extra por las dudas de remanentes de markdown pesado
             text = text.replace(/###?\s+/g, '').replace(/\`\`\`/g, '').trim();
             await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${text}` }, { quoted: msg });
         } else {
@@ -95,7 +110,7 @@ Consulta del usuario: ${args}`;
 }
 
 async function handleLetras(sock, from, msg, args) {
-    if (!args) return await sock.sendMessage(from, { text: '⚠️ Formato: /letras [canción] o /letras [canción - artista]' }, { quoted: msg });
+    if (!args) return await sock.sendMessage(from, { text: '⚠️ Formato: /letras [canción]' }, { quoted: msg });
     try {
         const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
         const data = await res.json();
@@ -119,7 +134,8 @@ async function handleReddit(sock, from, msg, args, originalCommand) {
 
     try {
         const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'whatsapp:bot:instincktt-sub:v1.0.0' } });
+        // Cabecera reforzada para evitar el 403
+        const res = await fetch(url, { headers: { ...REAL_BROWSER_HEADERS, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0' } });
         if (!res.ok) throw new Error(`Reddit bloqueó el acceso (Código ${res.status}).`);
 
         const json = await res.json();
@@ -141,12 +157,7 @@ async function handlePinterest(sock, from, msg, args) {
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar en Pinterest.' }, { quoted: msg });
     try {
         const url = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`;
-        const res = await fetch(url, { 
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-            }
-        });
+        const res = await fetch(url, { headers: REAL_BROWSER_HEADERS });
         if (!res.ok) throw new Error(`Pinterest rechazó la consulta (Código ${res.status}).`);
 
         const html = await res.text();
@@ -158,7 +169,7 @@ async function handlePinterest(sock, from, msg, args) {
         if (matches.length > 0) {
             const imgUrl = matches[Math.floor(Math.random() * Math.min(10, matches.length))];
             await sock.sendMessage(from, { image: { url: imgUrl }, caption: `📌 Pinterest: *${args}*` }, { quoted: msg });
-        } else await sock.sendMessage(from, { text: '❌ No se encontraron imágenes.' }, { quoted: msg });
+        } else await sock.sendMessage(from, { text: '❌ No se encontraron imágenes accesibles públicamente.' }, { quoted: msg });
     } catch (e) {
         await sock.sendMessage(from, { text: `❌ Error en Pinterest: ${e.message}` }, { quoted: msg });
     }
@@ -189,34 +200,44 @@ async function handleRuleta(sock, from, msg, args) {
     await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}` }, { quoted: msg });
 }
 
-async function handleTest(sock, from, msg) {
-    await sock.sendMessage(from, { text: '🔄 Ejecutando diagnóstico de APIs. Dame un segundo...' }, { quoted: msg });
-    let reporte = "📊 *REPORTE DE SISTEMA*\n\n";
+// 🌟 NUEVO GENERADOR DE TEST LITERAL (Simula entradas en tiempo real)
+async function handleTestCadena(sock, from, msg) {
+    await sock.sendMessage(from, { text: '🧪 *[SISTEMA] Iniciando Secuencia de Auto-Test Total...*' }, { quoted: msg });
+    
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${MI_GEMINI_KEY}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: "hola" }] }] })
-        });
-        reporte += res.ok ? "✅ Gemini (Google): Operativo\n" : `❌ Gemini: Fallo API (${res.status})\n`;
-    } catch(e) { reporte += `❌ Gemini: Error (${e.message})\n`; }
+    // Array con la simulación exacta de los comandos
+    const listaTests = [
+        { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }) },
+        { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, msg, '¿El bot es el mejor? 1;2') },
+        { cmd: '/letras Kali Uchis Luna', ejecutar: async () => await handleLetras(sock, from, msg, 'Kali Uchis Luna') },
+        { cmd: '/reddit memes', ejecutar: async () => await handleReddit(sock, from, msg, 'memes', '/reddit') },
+        { cmd: '/pin gatos', ejecutar: async () => await handlePinterest(sock, from, msg, 'gatos') },
+        { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, msg, 'Qué día es hoy', false) },
+        { cmd: '/googlep Escribe una frase corta motivacional', ejecutar: async () => await handleGoogle(sock, from, msg, 'Escribe una frase corta motivacional', true) },
+        
+        // Tests de comandos de administración
+        { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); } },
+        { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); } },
+        { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); } },
+        { cmd: '/modotrucadooff', ejecutar: async () => { modoTrucado = false; return await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); } },
+        { cmd: '/off', ejecutar: async () => { botEnabled = false; return await sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: msg }); } },
+        { cmd: '/on', ejecutar: async () => { botEnabled = true; return await sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); } }
+    ];
 
-    try {
-        const res = await fetch(`https://lrclib.net/api/search?q=test`);
-        reporte += res.ok ? "✅ Letras (LrcLib): Operativo\n" : `❌ Letras: Fallo servidor (${res.status})\n`;
-    } catch(e) { reporte += `❌ Letras: Error (${e.message})\n`; }
+    for (const item of listaTests) {
+        await wait(2500); // 2.5 segundos de respiro para no saturar WhatsApp
+        await sock.sendMessage(from, { text: `⌨️ _Simulando comando:_ *${item.cmd}*` });
+        await wait(500);
+        try {
+            await item.ejecutar();
+        } catch (err) {
+            await sock.sendMessage(from, { text: `💥 Fallo crítico en comando ${item.cmd}: ${err.message}` }, { quoted: msg });
+        }
+    }
 
-    try {
-        const res = await fetch(`https://www.reddit.com/r/all/hot.json?limit=1`, { headers: { 'User-Agent': 'whatsapp:bot:test' } });
-        reporte += res.ok ? "✅ Reddit: Operativo\n" : `❌ Reddit: Fallo conexión (${res.status})\n`;
-    } catch(e) { reporte += `❌ Reddit: Error (${e.message})\n`; }
-
-    try {
-        const res = await fetch(`https://www.pinterest.com/search/pins/?q=gato`);
-        reporte += res.ok ? "✅ Pinterest: Operativo\n" : `❌ Pinterest: Bloqueado (${res.status})\n`;
-    } catch(e) { reporte += `❌ Pinterest: Error (${e.message})\n`; }
-
-    await sock.sendMessage(from, { text: reporte }, { quoted: msg });
+    await wait(1500);
+    await sock.sendMessage(from, { text: '✨ *🏁 [SISTEMA] Secuencia de simulación finalizada por completo.*' }, { quoted: msg });
 }
 
 // ==========================================
@@ -235,7 +256,7 @@ async function connectToWhatsApp() {
         browser: Browsers.ubuntu('Chrome') 
     });
 
-    // 🌟 INYECTOR DEL PREFIJO [¡+!] OBLIGATORIO Y SEGURO
+    // Inyector del prefijo [¡+!] obligatorio en toda salida de texto
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -317,7 +338,7 @@ async function connectToWhatsApp() {
                 '/reddit': () => handleReddit(sock, from, msg, args, originalCommand),
                 '/pin': () => handlePinterest(sock, from, msg, args),
                 '/ruleta': () => handleRuleta(sock, from, msg, args),
-                '/test': () => handleTest(sock, from, msg)
+                '/test': () => handleTestCadena(sock, from, msg) // Redirección al test dinámico
             };
 
             if (isAdmin && comandosAdmin[command]) {
