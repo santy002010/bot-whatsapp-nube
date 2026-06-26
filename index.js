@@ -24,7 +24,6 @@ app.listen(PORT, () => {
     console.log(`[EXPRESS] Servidor web listo en el puerto ${PORT} (Mantiene el bot 24/7)`);
 });
 
-// CHATS PERMITIDOS (El grupo y tu propio número para el auto-chat)
 const HOST_NUMBER = '5491128394646';
 const ALLOWED_CHATS = ['120363426591951143@g.us', `${HOST_NUMBER}@s.whatsapp.net`];
 const ADMINS = [`${HOST_NUMBER}@s.whatsapp.net`, '5491178972853@s.whatsapp.net'];
@@ -48,7 +47,6 @@ function saveBannedUsers(list) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(list, null, 2));
 }
 
-// Cabeceras avanzadas de simulación para evitar bloqueos 403
 const REAL_BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -89,7 +87,6 @@ Consulta del usuario: ${args}`;
             body: JSON.stringify({ contents: [{ parts: [{ text: sistemaPrompt }] }] })
         });
 
-        // Capturar saturación de API de Google
         if (res.status === 429) {
             return await sock.sendMessage(from, { text: '⚠️ *Error Gemini (429):* Google está rechazando los mensajes temporalmente por exceso de uso en la Key gratuita. Esperá un minuto.' }, { quoted: msg });
         }
@@ -134,7 +131,6 @@ async function handleReddit(sock, from, msg, args, originalCommand) {
 
     try {
         const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
-        // Cabecera reforzada para evitar el 403
         const res = await fetch(url, { headers: { ...REAL_BROWSER_HEADERS, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0' } });
         if (!res.ok) throw new Error(`Reddit bloqueó el acceso (Código ${res.status}).`);
 
@@ -200,13 +196,11 @@ async function handleRuleta(sock, from, msg, args) {
     await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}` }, { quoted: msg });
 }
 
-// 🌟 NUEVO GENERADOR DE TEST LITERAL (Simula entradas en tiempo real)
 async function handleTestCadena(sock, from, msg) {
     await sock.sendMessage(from, { text: '🧪 *[SISTEMA] Iniciando Secuencia de Auto-Test Total...*' }, { quoted: msg });
     
     const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Array con la simulación exacta de los comandos
     const listaTests = [
         { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }) },
         { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, msg, '¿El bot es el mejor? 1;2') },
@@ -216,7 +210,6 @@ async function handleTestCadena(sock, from, msg) {
         { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, msg, 'Qué día es hoy', false) },
         { cmd: '/googlep Escribe una frase corta motivacional', ejecutar: async () => await handleGoogle(sock, from, msg, 'Escribe una frase corta motivacional', true) },
         
-        // Tests de comandos de administración
         { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); } },
         { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); } },
         { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); } },
@@ -226,7 +219,7 @@ async function handleTestCadena(sock, from, msg) {
     ];
 
     for (const item of listaTests) {
-        await wait(2500); // 2.5 segundos de respiro para no saturar WhatsApp
+        await wait(2500); 
         await sock.sendMessage(from, { text: `⌨️ _Simulando comando:_ *${item.cmd}*` });
         await wait(500);
         try {
@@ -256,7 +249,11 @@ async function connectToWhatsApp() {
         browser: Browsers.ubuntu('Chrome') 
     });
 
-    // Inyector del prefijo [¡+!] obligatorio en toda salida de texto
+    // Asegurar el guardado instantáneo de credenciales rotativas de WhatsApp
+    sock.ev.on('creds.update', async () => {
+        await saveCreds();
+    });
+
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -269,27 +266,43 @@ async function connectToWhatsApp() {
         return originalSendMessage(jid, content, options);
     };
 
-    sock.ev.on('creds.update', saveCreds);
-
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update; 
+        
         if (connection === 'close') {
             codigoSolicitado = false; 
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) setTimeout(() => connectToWhatsApp(), 10000); 
+            const debeReiniciar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (debeReiniciar) {
+                console.log('[SISTEMA] Conexión cerrada. Reintentando en 10 segundos...');
+                setTimeout(() => connectToWhatsApp(), 10000); 
+            } else {
+                console.log('[❌ CRÍTICO] Sesión cerrada por el usuario. Borrá la carpeta auth_session_v3 y vinculá de nuevo.');
+            }
             return;
         }
+        
         if (connection === 'open') {
             console.log('[SISTEMA] ¡Bot conectado con éxito a WhatsApp! 🎉');
             codigoSolicitado = false;
+            return;
         }
+
+        // 🌟 ARREGLO AQUÍ: Solo pide código si de verdad no hay credenciales registradas y no está conectado
         if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
             codigoSolicitado = true; 
             setTimeout(async () => {
+                // Doble check por si se cargaron las credenciales durante la espera
+                if (sock.authState.creds.registered) {
+                    codigoSolicitado = false;
+                    return;
+                }
                 try {
                     let code = await sock.requestPairingCode(HOST_NUMBER.replace(/[^0-9]/g, ''));
                     console.log(`\n🔥 TU CÓDIGO DE VINCULACIÓN ACTUAL: ${code?.match(/.{1,4}/g)?.join('-').toUpperCase() || code} 🔥\n`);
-                } catch (err) { codigoSolicitado = false; }
-            }, 8000); 
+                } catch (err) { 
+                    codigoSolicitado = false; 
+                }
+            }, 10000); 
         }
     });
 
@@ -299,8 +312,6 @@ async function connectToWhatsApp() {
             if (!msg.message) return;
 
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
-            
-            // Si te enviás un mensaje a vos mismo y NO arranca con '/', se ignora para evitar bucles.
             if (msg.key.fromMe && !text.startsWith('/')) return;
 
             const from = msg.key.remoteJid;
@@ -318,9 +329,6 @@ async function connectToWhatsApp() {
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
 
-            // ==========================================
-            // 📝 LISTA DE COMANDOS FÁCIL DE EDITAR
-            // ==========================================
             const comandosAdmin = {
                 '/status': () => sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }),
                 '/on': () => { botEnabled = true; return sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); },
@@ -338,7 +346,7 @@ async function connectToWhatsApp() {
                 '/reddit': () => handleReddit(sock, from, msg, args, originalCommand),
                 '/pin': () => handlePinterest(sock, from, msg, args),
                 '/ruleta': () => handleRuleta(sock, from, msg, args),
-                '/test': () => handleTestCadena(sock, from, msg) // Redirección al test dinámico
+                '/test': () => handleTestCadena(sock, from, msg)
             };
 
             if (isAdmin && comandosAdmin[command]) {
