@@ -196,26 +196,39 @@ async function handleRuleta(sock, from, msg, args) {
     await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}` }, { quoted: msg });
 }
 
-async function handleTestCadena(sock, from, msg) {
-    await sock.sendMessage(from, { text: '🧪 *[SISTEMA] Iniciando Secuencia de Auto-Test Total...*' }, { quoted: msg });
+// 🌟 SOLUCIÓN AL AUTO-TEST PRIVADO: Evita el bloqueo por autoreferencia de mensajes de WhatsApp
+async function handleTestCadena(sock, from, originalMsg) {
+    await sock.sendMessage(from, { text: '🧪 *[SISTEMA] Iniciando Secuencia de Auto-Test Total...*' }, { quoted: originalMsg });
     
     const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // Estructura de mensaje artificial para simular las citas del bot de manera segura en chats privados
+    const mockMsg = {
+        key: {
+            remoteJid: from,
+            fromMe: false,
+            id: 'MOCK_TEST_ID_' + Date.now(),
+            participant: originalMsg.key.participant || originalMsg.key.remoteJid
+        },
+        message: { conversation: '' }
+    };
+
     const listaTests = [
-        { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }) },
-        { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, msg, '¿El bot es el mejor? 1;2') },
-        { cmd: '/letras Kali Uchis Luna', ejecutar: async () => await handleLetras(sock, from, msg, 'Kali Uchis Luna') },
-        { cmd: '/reddit memes', ejecutar: async () => await handleReddit(sock, from, msg, 'memes', '/reddit') },
-        { cmd: '/pin gatos', ejecutar: async () => await handlePinterest(sock, from, msg, 'gatos') },
-        { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, msg, 'Qué día es hoy', false) },
-        { cmd: '/googlep Escribe una frase corta motivacional', ejecutar: async () => await handleGoogle(sock, from, msg, 'Escribe una frase corta motivacional', true) },
+        { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: mockMsg }) },
+        { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, mockMsg, '¿El bot es el mejor? 1;2') },
+        { cmd: '/letras Kali Uchis Luna', ejecutar: async () => await handleLetras(sock, from, mockMsg, 'Kali Uchis Luna') },
+        { cmd: '/reddit memes', ejecutar: async () => await handleReddit(sock, from, mockMsg, 'memes', '/reddit') },
+        { cmd: '/pin gatos', ejecutar: async () => await handlePinterest(sock, from, mockMsg, 'gatos') },
+        { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, mockMsg, 'Qué día es hoy', false) },
+        { cmd: '/googlep Escribe una frase corta motivacional', ejecutar: async () => await handleGoogle(sock, from, mockMsg, 'Escribe una frase corta motivacional', true) },
         
-        { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); } },
-        { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); } },
-        { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); } },
-        { cmd: '/modotrucadooff', ejecutar: async () => { modoTrucado = false; return await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); } },
-        { cmd: '/off', ejecutar: async () => { botEnabled = false; return await sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: msg }); } },
-        { cmd: '/on', ejecutar: async () => { botEnabled = true; return await sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); } }
+        // Comandos Administrativos
+        { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: mockMsg }); } },
+        { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: mockMsg }); } },
+        { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: mockMsg }); } },
+        { cmd: '/modotrucadooff', ejecutar: async () => { modoTrucado = false; return await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: mockMsg }); } },
+        { cmd: '/off', ejecutar: async () => { botEnabled = false; return await sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: mockMsg }); } },
+        { cmd: '/on', ejecutar: async () => { botEnabled = true; return await sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: mockMsg }); } }
     ];
 
     for (const item of listaTests) {
@@ -225,12 +238,12 @@ async function handleTestCadena(sock, from, msg) {
         try {
             await item.ejecutar();
         } catch (err) {
-            await sock.sendMessage(from, { text: `💥 Fallo crítico en comando ${item.cmd}: ${err.message}` }, { quoted: msg });
+            await sock.sendMessage(from, { text: `💥 Fallo crítico en comando ${item.cmd}: ${err.message}` }, { quoted: originalMsg });
         }
     }
 
     await wait(1500);
-    await sock.sendMessage(from, { text: '✨ *🏁 [SISTEMA] Secuencia de simulación finalizada por completo.*' }, { quoted: msg });
+    await sock.sendMessage(from, { text: '✨ *🏁 [SISTEMA] Secuencia de simulación finalizada por completo.*' }, { quoted: originalMsg });
 }
 
 // ==========================================
@@ -249,7 +262,6 @@ async function connectToWhatsApp() {
         browser: Browsers.ubuntu('Chrome') 
     });
 
-    // Asegurar el guardado instantáneo de credenciales rotativas de WhatsApp
     sock.ev.on('creds.update', async () => {
         await saveCreds();
     });
@@ -287,11 +299,9 @@ async function connectToWhatsApp() {
             return;
         }
 
-        // 🌟 ARREGLO AQUÍ: Solo pide código si de verdad no hay credenciales registradas y no está conectado
         if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
             codigoSolicitado = true; 
             setTimeout(async () => {
-                // Doble check por si se cargaron las credenciales durante la espera
                 if (sock.authState.creds.registered) {
                     codigoSolicitado = false;
                     return;
