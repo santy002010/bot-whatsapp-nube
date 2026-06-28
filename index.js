@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const pino = require('pino');
-const { MongoClient } = require('mongodb'); // <-- Driver de Mongo
+const { MongoClient } = require('mongodb');
 const { 
     default: makeWASocket, 
     DisconnectReason, 
@@ -14,7 +14,7 @@ const {
 } = require('@whiskeysockets/baileys');
 
 // ==========================================
-// 1. CONFIGURACIÓN DEL SERVIDOR Y ESTADO
+// 1. CONFIGURACIÓN DEL SERVIDOR WEB
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -27,18 +27,21 @@ app.listen(PORT, () => {
     console.log(`[EXPRESS] Servidor web listo en el puerto ${PORT} (Mantiene el bot 24/7)`);
 });
 
-// El bot buscará la variable 'MONGO_URI' que configuraste en Render
+// ==========================================
+// 2. CONFIGURACIÓN DE BASE DE DATOS Y VARIABLES
+// ==========================================
 const MONGO_URI = process.env.MONGO_URI;
 
 if (!MONGO_URI) {
     console.error('[❌ ERROR] La variable de entorno MONGO_URI no está configurada en Render.');
-    process.exit(1); // Detiene el bot si no encuentra la base de datos
+    process.exit(1);
 }
 
 const DB_NAME = 'whatsapp_bot_db';
 const COLLECTION_NAME = 'auth_session';
 
 const HOST_NUMBER = '5491128394646';
+// ACÁ ESTÁN LOS ÚNICOS CHATS PERMITIDOS (El grupo y tu número)
 const ALLOWED_CHATS = ['120363426591951143@g.us', `${HOST_NUMBER}@s.whatsapp.net`];
 const ADMINS = [`${HOST_NUMBER}@s.whatsapp.net`, '5491178972853@s.whatsapp.net'];
 const MI_GEMINI_KEY = process.env.GEMINI_KEY || 'TU_API_KEY_AQUI';
@@ -48,7 +51,7 @@ let nsfwEnabled = false;
 let modoTrucado = true;
 let codigoSolicitado = false; 
 
-// Sistema de Baneos (Se mantiene en memoria/disco básico para no saturar la BD)
+// Sistema de Baneos 
 const AUTH_DIR = path.join(__dirname, 'config_local'); 
 const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
@@ -67,7 +70,7 @@ const REAL_BROWSER_HEADERS = {
 };
 
 // ==========================================
-// 2. ADAPTADOR DE MONGODB PARA BAILEYS
+// 3. ADAPTADOR DE MONGODB PARA BAILEYS
 // ==========================================
 async function useMongoDBAuthState(collection) {
     const writeData = async (data, id) => {
@@ -121,10 +124,8 @@ async function useMongoDBAuthState(collection) {
 }
 
 // ==========================================
-// 3. FUNCIONES MODULARES (COMANDOS)
+// 4. FUNCIONES MODULARES (COMANDOS)
 // ==========================================
-// (Se mantienen idénticas a la versión anterior)
-
 async function handleGoogle(sock, from, msg, args, usarPro = false) {
     if (!args) return await sock.sendMessage(from, { text: `⚠️ Formato: ${usarPro ? '/googlep' : '/google'} [tu consulta]` }, { quoted: msg });
     if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
@@ -238,7 +239,7 @@ async function handleTestCadena(sock, from, originalMsg) {
 }
 
 // ==========================================
-// 4. INICIALIZACIÓN MONGODB Y WHATSAPP
+// 5. INICIALIZACIÓN MONGODB Y WHATSAPP
 // ==========================================
 async function startBot() {
     console.log('[SISTEMA] Conectando a MongoDB Atlas...');
@@ -255,7 +256,6 @@ async function startBot() {
     const db = mongoClient.db(DB_NAME);
     const authCollection = db.collection(COLLECTION_NAME);
 
-    // Integración del estado de Autenticación con MongoDB
     const { state, saveCreds } = await useMongoDBAuthState(authCollection);
     
     let version = [2, 3000, 1017551063];
@@ -273,6 +273,7 @@ async function startBot() {
         await saveCreds();
     });
 
+    // Modificamos el envío para que todo empiece con [¡+!]
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
@@ -317,24 +318,36 @@ async function startBot() {
         }
     });
 
+    // ==========================================
+    // 6. LECTURA Y FILTRADO DE MENSAJES
+    // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
         try {
             const msg = m.messages[0];
             if (!msg.message) return;
+            
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
-            if (msg.key.fromMe && !text.startsWith('/')) return;
+            
+            // 1. Ignorar cualquier mensaje que tenga la marca del bot (Previene el bucle infinito)
+            if (text.startsWith('[¡+!]')) return;
+
+            // 2. Si el mensaje no empieza con '/', lo ignoramos (No es un comando)
+            if (!text.startsWith('/')) return;
 
             const from = msg.key.remoteJid;
+
+            // 3. Bloqueo estricto: Solo funciona en los chats de ALLOWED_CHATS
             if (!ALLOWED_CHATS.includes(from)) return;
 
             let sender = msg.key.participant || msg.key.remoteJid;
-            if (!text.startsWith('/')) return;
-
+            
             const parts = text.split(' ');
             const command = parts[0].toLowerCase();
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
-            const isAdmin = ADMINS.includes(sender);
+            
+            // Si mandás el mensaje vos mismo o si está en la lista ADMINS
+            const isAdmin = msg.key.fromMe || ADMINS.includes(sender);
 
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
@@ -361,6 +374,7 @@ async function startBot() {
 
             if (isAdmin && comandosAdmin[command]) await comandosAdmin[command]();
             else if (comandosPublicos[command]) await comandosPublicos[command]();
+            
         } catch (err) {
             console.error('[ERROR MENSAJE]', err);
         }
