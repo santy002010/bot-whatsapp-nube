@@ -162,9 +162,20 @@ async function handleReddit(sock, from, msg, args, originalCommand) {
     const isNSFW = originalCommand === '/reddIt';
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg });
     if (isNSFW && !nsfwEnabled) return await sock.sendMessage(from, { text: '🔞 *Denegado.* Requiere `/+18on`.' }, { quoted: msg });
+    
     try {
         const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
-        const res = await fetch(url, { headers: { ...REAL_BROWSER_HEADERS, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+        
+        // CORRECCIÓN: Usamos un User-Agent honesto. Reddit le abre la puerta a scripts declarados.
+        const res = await fetch(url, { 
+            headers: { 
+                'User-Agent': 'NodeJS:WhatsAppAssistBot:v1.0.0 (by /u/bot_owner)',
+                'Accept': 'application/json'
+            } 
+        });
+
+        if (!res.ok) throw new Error(`Reddit bloqueó la petición (HTTP ${res.status})`);
+
         const json = await res.json();
         let posts = (json?.data?.children || []).map(c => c.data).filter(p => isNSFW ? p.over_18 : !p.over_18);
         if (!posts.length) return await sock.sendMessage(from, { text: '❌ Sin resultados aptos.' }, { quoted: msg });
@@ -172,23 +183,50 @@ async function handleReddit(sock, from, msg, args, originalCommand) {
         const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
         const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: https://reddit.com${post.permalink}`;
         const tieneImagen = post.url && (post.url.match(/\.(jpeg|jpg|gif|png)$/) != null || post.url.includes('i.redd.it'));
+        
         if (tieneImagen) await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
         else await sock.sendMessage(from, { text: `🤖 *${post.title}*${(post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '')}${suffix}` }, { quoted: msg });
-    } catch (e) { await sock.sendMessage(from, { text: `❌ Error con Reddit: ${e.message}` }, { quoted: msg }); }
+        
+    } catch (e) { 
+        await sock.sendMessage(from, { text: `❌ Error con Reddit: ${e.message}` }, { quoted: msg }); 
+    }
 }
 
 async function handlePinterest(sock, from, msg, args) {
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg });
     try {
-        const res = await fetch(`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(args)}`, { headers: REAL_BROWSER_HEADERS });
-        const html = await res.text();
-        let matches = [...html.matchAll(/https?:\\?\/\\?\/i\.pinimg\.com\\?\/[^"'\s>]+/gi)].map(m => m[0].replace(/\\/g, '')).filter(link => link.includes('/736x/') || link.includes('/474x/') || link.includes('/originals/'));
-        matches = [...new Set(matches)]; 
+        const query = encodeURIComponent(args);
+        // CORRECCIÓN: Atacamos el endpoint de recursos nativo de Pinterest simulando ser una llamada AJAX
+        const url = `https://www.pinterest.com/resource/BaseSearchResource/get/?source_url=%2Fsearch%2Fpins%2F%3Fq%3D${query}&data=%7B%22options%22%3A%7B%22isPrefetch%22%3Afalse%2C%22query%22%3A%22${args}%22%2C%22scope%22%3A%22pins%22%2C%22no_fetch_context_on_resource%22%3Afalse%7D%2C%22context%22%3A%7B%7D%7D`;
+
+        const res = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': `https://www.pinterest.com/search/pins/?q=${query}`
+            }
+        });
+
+        const json = await res.json();
+        const results = json?.resource_response?.data?.results || [];
+        
+        // Filtramos para obtener directamente el link en alta resolución (.orig)
+        const matches = results
+            .map(r => r.images?.orig?.url || r.images?.['736x']?.url)
+            .filter(Boolean);
+
         if (matches.length > 0) {
-            await sock.sendMessage(from, { image: { url: matches[Math.floor(Math.random() * Math.min(10, matches.length))] }, caption: `📌 Pinterest: *${args}*` }, { quoted: msg });
-        } else await sock.sendMessage(from, { text: '❌ No se encontraron imágenes accesibles.' }, { quoted: msg });
-    } catch (e) { await sock.sendMessage(from, { text: `❌ Error en Pinterest: ${e.message}` }, { quoted: msg }); }
+            const imagenElegida = matches[Math.floor(Math.random() * Math.min(10, matches.length))];
+            await sock.sendMessage(from, { image: { url: imagenElegida }, caption: `📌 Pinterest: *${args}*` }, { quoted: msg });
+        } else {
+            await sock.sendMessage(from, { text: '❌ No se encontraron imágenes accesibles para esa búsqueda.' }, { quoted: msg });
+        }
+    } catch (e) { 
+        await sock.sendMessage(from, { text: `❌ Error en Pinterest: ${e.message}` }, { quoted: msg }); 
+    }
 }
+
 
 async function handleRuleta(sock, from, msg, args) {
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Ejemplo: `/ruleta ¿Va a llover? 1;100`' }, { quoted: msg });
