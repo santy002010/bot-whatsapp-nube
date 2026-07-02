@@ -396,7 +396,7 @@ async function startBot() {
         }
     });
 
-    // ==========================================
+    //     // ==========================================
     // 6. LECTURA Y FILTRADO DE MENSAJES
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
@@ -413,19 +413,21 @@ async function startBot() {
             if (!text.startsWith('/')) return;
 
             const from = msg.key.remoteJid;
+            const isMe = msg.key.fromMe; // ¿Sos vos hablando contigo mismo o ejecutando un comando?
 
-            // 3. Bloqueo estricto: Solo funciona en los chats de ALLOWED_CHATS
-            if (!ALLOWED_CHATS.includes(from)) return;
+            // 3. Bloqueo estricto: Solo funciona en ALLOWED_CHATS, A MENOS que seas vos mismo (isMe) probando comandos
+            if (!isMe && !ALLOWED_CHATS.includes(from)) return;
 
-            let sender = msg.key.participant || msg.key.remoteJid;
+            // Definimos el sender real
+            let sender = isMe ? `${HOST_NUMBER}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             
             const parts = text.split(' ');
             const command = parts[0].toLowerCase();
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
             
-            // Si mandás el mensaje vos mismo o si está en la lista ADMINS
-            const isAdmin = msg.key.fromMe || ADMINS.includes(sender);
+            // Sos admin si eres el dueño del bot (isMe) o estás en la lista ADMINS
+            const isAdmin = isMe || ADMINS.includes(sender);
 
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
@@ -457,7 +459,7 @@ async function startBot() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
-}
+
 
 // Inicializar todo
 startBot();
