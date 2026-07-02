@@ -64,11 +64,6 @@ function saveBannedUsers(list) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(list, null, 2));
 }
 
-const REAL_BROWSER_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Accept': '*/*'
-};
-
 // ==========================================
 // 3. ADAPTADOR DE MONGODB PARA BAILEYS
 // ==========================================
@@ -126,24 +121,61 @@ async function useMongoDBAuthState(collection) {
 // ==========================================
 // 4. FUNCIONES MODULARES (COMANDOS)
 // ==========================================
+
+// Lógica de Reintentos para Gemini (Evita el error 429)
+async function askGeminiWithRetry(sistemaPrompt, usarPro = false, maxRetries = 3) {
+    let delay = 2000; // Empieza esperando 2 segundos
+    const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const res = await fetch(url, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ contents: [{ parts: [{ text: sistemaPrompt }] }] }) 
+            });
+            
+            if (res.status === 429) throw new Error('429');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            
+            const json = await res.json();
+            return json.candidates[0]?.content?.parts?.[0]?.text;
+        } catch (error) {
+            if (error.message.includes('429')) {
+                if (i < maxRetries - 1) {
+                    console.log(`⚠️ Gemini 429: Reintentando en ${delay / 1000} segundos...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Duplica la espera: 2s, 4s...
+                    continue;
+                }
+            }
+            throw error;
+        }
+    }
+}
+
 async function handleGoogle(sock, from, msg, args, usarPro = false) {
     if (!args) return await sock.sendMessage(from, { text: `⚠️ Formato: ${usarPro ? '/googlep' : '/google'} [tu consulta]` }, { quoted: msg });
+    
     if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
         return await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
     }
+    
     try {
-        const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
         const sistemaPrompt = `REGLAS OBLIGATORIAS DE RESPUESTA:\n1. Actúa como una persona normal.\n2. NUNCA digas que sos una IA.\n3. FORMATO WHATSAPP LIMPIO: Usa asteriscos para negritas, sin markdown raro.\nConsulta: ${args}`;
         
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: sistemaPrompt }] }] }) });
-        if (res.status === 429) return await sock.sendMessage(from, { text: '⚠️ *Error Gemini (429):* Exceso de uso en la Key. Esperá un minuto.' }, { quoted: msg });
+        const text = await askGeminiWithRetry(sistemaPrompt, usarPro);
         
-        const json = await res.json();
-        let text = json.candidates[0]?.content?.parts?.[0]?.text;
         if (text) await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${text.replace(/###?\s+/g, '').replace(/\`\`\`/g, '').trim()}` }, { quoted: msg });
         else await sock.sendMessage(from, { text: '❌ No pude procesar la respuesta de Google.' }, { quoted: msg });
-    } catch (e) { await sock.sendMessage(from, { text: `❌ Error en Gemini: ${e.message}` }, { quoted: msg }); }
+    } catch (e) { 
+        if (e.message.includes('429')) {
+            await sock.sendMessage(from, { text: '⚠️ *Google está saturado (Error 429).* Intenté varias veces pero no hubo caso. Esperá un toque.' }, { quoted: msg });
+        } else {
+            await sock.sendMessage(from, { text: `❌ Error en Gemini: ${e.message}` }, { quoted: msg }); 
+        }
+    }
 }
 
 async function handleLetras(sock, from, msg, args) {
@@ -159,90 +191,98 @@ async function handleLetras(sock, from, msg, args) {
 }
 
 async function handleReddit(sock, from, msg, args, originalCommand) {
-    const isNSFW = originalCommand === '/reddIt';
+    const isNSFW = originalCommand === '/reddit'; // Mantengo tu lógica de minúsculas/mayúsculas si la tenías así
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg });
     if (isNSFW && !nsfwEnabled) return await sock.sendMessage(from, { text: '🔞 *Denegado.* Requiere `/+18on`.' }, { quoted: msg });
     
     try {
         const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
         
-        // CORRECCIÓN: Usamos un User-Agent honesto. Reddit le abre la puerta a scripts declarados.
         const res = await fetch(url, { 
             headers: { 
-                'User-Agent': 'NodeJS:WhatsAppAssistBot:v1.0.0 (by /u/bot_owner)',
+                'User-Agent': 'NodeJS:BotWhatsApp:v2.0.0 (by /u/santu2098)',
                 'Accept': 'application/json'
             } 
         });
 
-        if (!res.ok) throw new Error(`Reddit bloqueó la petición (HTTP ${res.status})`);
+        if (!res.ok) throw new Error(`Bloqueo de red (HTTP ${res.status})`);
 
         const json = await res.json();
         let posts = (json?.data?.children || []).map(c => c.data).filter(p => isNSFW ? p.over_18 : !p.over_18);
+        
         if (!posts.length) return await sock.sendMessage(from, { text: '❌ Sin resultados aptos.' }, { quoted: msg });
         
         const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
         const suffix = `\n\nSubreddit: r/${post.subreddit}\nLink: https://reddit.com${post.permalink}`;
         const tieneImagen = post.url && (post.url.match(/\.(jpeg|jpg|gif|png)$/) != null || post.url.includes('i.redd.it'));
         
-        if (tieneImagen) await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
-        else await sock.sendMessage(from, { text: `🤖 *${post.title}*${(post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '')}${suffix}` }, { quoted: msg });
-        
+        if (tieneImagen) {
+            await sock.sendMessage(from, { image: { url: post.url }, caption: `🤖 *${post.title}*${suffix}` }, { quoted: msg });
+        } else {
+            const texto = post.selftext ? `\n\n${post.selftext.slice(0, 500)}...` : '';
+            await sock.sendMessage(from, { text: `🤖 *${post.title}*${texto}${suffix}` }, { quoted: msg });
+        }
     } catch (e) { 
-        await sock.sendMessage(from, { text: `❌ Error con Reddit: ${e.message}` }, { quoted: msg }); 
+        await sock.sendMessage(from, { text: `❌ Error con Reddit: ${e.message}. Puede que Render siga bloqueado.` }, { quoted: msg }); 
     }
 }
 
 async function handlePinterest(sock, from, msg, args) {
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Especificá qué buscar.' }, { quoted: msg });
+    
+    // Llamamos a la variable de entorno (Tenés que crearla en Render)
+    const GOOGLE_SEARCH_KEY = process.env.GOOGLE_SEARCH_KEY;
+    // Tu ID de buscador personalizado (CSE)
+    const CX_ID = 'a24fe245ad6734e91'; 
+
+    if (!GOOGLE_SEARCH_KEY) {
+        return await sock.sendMessage(from, { text: '❌ Falta configurar la variable `Google Search_KEY` en Render para usar este buscador.' }, { quoted: msg });
+    }
+
     try {
         const query = encodeURIComponent(args);
-        // CORRECCIÓN: Atacamos el endpoint de recursos nativo de Pinterest simulando ser una llamada AJAX
-        const url = `https://www.pinterest.com/resource/BaseSearchResource/get/?source_url=%2Fsearch%2Fpins%2F%3Fq%3D${query}&data=%7B%22options%22%3A%7B%22isPrefetch%22%3Afalse%2C%22query%22%3A%22${args}%22%2C%22scope%22%3A%22pins%22%2C%22no_fetch_context_on_resource%22%3Afalse%7D%2C%22context%22%3A%7B%7D%7D`;
+        // Atacamos la API de Google Custom Search pidiendo específicamente imágenes (searchType=image)
+        const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_KEY}&cx=${CX_ID}&q=${query}&searchType=image`;
 
-        const res = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Referer': `https://www.pinterest.com/search/pins/?q=${query}`
-            }
-        });
+        const res = await fetch(url);
+        
+        if (!res.ok) {
+            throw new Error(`Google Search bloqueó la petición (HTTP ${res.status}). Revisá tu API Key.`);
+        }
 
         const json = await res.json();
-        const results = json?.resource_response?.data?.results || [];
-        
-        // Filtramos para obtener directamente el link en alta resolución (.orig)
-        const matches = results
-            .map(r => r.images?.orig?.url || r.images?.['736x']?.url)
-            .filter(Boolean);
+        const items = json.items || [];
 
-        if (matches.length > 0) {
-            const imagenElegida = matches[Math.floor(Math.random() * Math.min(10, matches.length))];
-            await sock.sendMessage(from, { image: { url: imagenElegida }, caption: `📌 Pinterest: *${args}*` }, { quoted: msg });
+        if (items.length > 0) {
+            // Google suele devolver 10 resultados. Elegimos uno al azar para variar.
+            const imagenElegida = items[Math.floor(Math.random() * items.length)].link;
+            await sock.sendMessage(from, { image: { url: imagenElegida }, caption: `📌 Búsqueda: *${args}*` }, { quoted: msg });
         } else {
-            await sock.sendMessage(from, { text: '❌ No se encontraron imágenes accesibles para esa búsqueda.' }, { quoted: msg });
+            await sock.sendMessage(from, { text: '❌ No se encontraron imágenes para esa búsqueda.' }, { quoted: msg });
         }
     } catch (e) { 
-        await sock.sendMessage(from, { text: `❌ Error en Pinterest: ${e.message}` }, { quoted: msg }); 
+        await sock.sendMessage(from, { text: `❌ Error en el buscador: ${e.message}` }, { quoted: msg }); 
     }
 }
-
 
 async function handleRuleta(sock, from, msg, args) {
     if (!args) return await sock.sendMessage(from, { text: '⚠️ Ejemplo: `/ruleta ¿Va a llover? 1;100`' }, { quoted: msg });
     let resultadoFinal = "", probabilidadMostrada = "", pregunta = args, siChance = 1, totalChance = 2, tieneProbabilidad = false, esTrucado = false;
     const probMatch = args.match(/(\d+);(\d+)\s*$/);
+    
     if (probMatch) {
         siChance = parseInt(probMatch[1]); totalChance = parseInt(probMatch[2]);
         pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
         probabilidadMostrada = ` (Probabilidad: ${siChance};${totalChance})`; tieneProbabilidad = true;
     }
+    
     if (modoTrucado) {
         const txt = pregunta.toLowerCase();
         if (((txt.includes('maxi') || txt.includes('máximo')) && txt.includes('femboy')) || (txt.includes('dylan') && txt.includes('perra')) || txt.includes('omeguita')) {
             resultadoFinal = "🔴 si"; esTrucado = true;
         }
     }
+    
     if (!esTrucado) resultadoFinal = (tieneProbabilidad ? (Math.floor(Math.random() * totalChance) + 1 <= siChance) : (Math.floor(Math.random() * 2) === 0)) ? "🔴 si" : "⚫ no";
     await sock.sendMessage(from, { text: `🎰 *Ruleta:* ${pregunta}\n\n🎲 Resultado: *${resultadoFinal}*${probabilidadMostrada}` }, { quoted: msg });
 }
