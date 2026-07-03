@@ -351,13 +351,22 @@ async function startBot() {
         await saveCreds();
     });
 
-    // Modificamos el envío para que todo empiece con [¡+!]
+    // Modificamos el envío para añadir la marca [¡+!] y solucionar el bug de responderse a uno mismo
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options) => {
         if (content && typeof content === 'object') {
             if (content.text) content.text = `[¡+!]\n${content.text}`;
             else if (content.image && content.caption) content.caption = `[¡+!]\n${content.caption}`;
         }
+        
+        // SOLUCIÓN AL BUG DEL CHAT PRIVADO: Si nos estamos enviando un mensaje a nosotros mismos,
+        // eliminamos el parámetro 'quoted' (la cita) para evitar que WhatsApp rechace el mensaje.
+        const cleanJid = jid.split('@')[0].replace(/^549/, '54');
+        const cleanHost = HOST_NUMBER.replace(/^549/, '54');
+        if (cleanJid === cleanHost && options && options.quoted) {
+            delete options.quoted;
+        }
+        
         return originalSendMessage(jid, content, options);
     };
 
@@ -396,7 +405,7 @@ async function startBot() {
         }
     });
 
-    //     // ==========================================
+    // ==========================================
     // 6. LECTURA Y FILTRADO DE MENSAJES
     // ==========================================
     sock.ev.on('messages.upsert', async (m) => {
@@ -413,21 +422,30 @@ async function startBot() {
             if (!text.startsWith('/')) return;
 
             const from = msg.key.remoteJid;
-            const isMe = msg.key.fromMe; // ¿Sos vos hablando contigo mismo o ejecutando un comando?
+            const isMe = msg.key.fromMe; 
 
-            // 3. Bloqueo estricto: Solo funciona en ALLOWED_CHATS, A MENOS que seas vos mismo (isMe) probando comandos
-            if (!isMe && !ALLOWED_CHATS.includes(from)) return;
+            // Normalizamos los números quitando el prefijo argentino '9' para comparar correctamente
+            const cleanFrom = from.split('@')[0].replace(/^549/, '54');
+            const cleanHost = HOST_NUMBER.replace(/^549/, '54');
+            const isSelfChat = cleanFrom === cleanHost;
+
+            // 3. Filtro inteligente: Permitir si el comando viene de vos mismo (isMe), 
+            // si estás en tu propio chat privado (isSelfChat), o si el ID del chat coincide con ALLOWED_CHATS
+            const isChatAllowed = isMe || isSelfChat || ALLOWED_CHATS.some(id => id.split('@')[0].replace(/^549/, '54') === cleanFrom);
+            
+            if (!isChatAllowed) return;
 
             // Definimos el sender real
-            let sender = isMe ? `${HOST_NUMBER}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
+            let sender = (isMe || isSelfChat) ? `${HOST_NUMBER}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             
             const parts = text.split(' ');
             const command = parts[0].toLowerCase();
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
             
-            // Sos admin si eres el dueño del bot (isMe) o estás en la lista ADMINS
-            const isAdmin = isMe || ADMINS.includes(sender);
+            // Sos admin si eres el dueño de la cuenta o estás en la lista ADMINS
+            const cleanSender = sender.split('@')[0].replace(/^549/, '54');
+            const isAdmin = isMe || isSelfChat || ADMINS.some(admin => admin.split('@')[0].replace(/^549/, '54') === cleanSender);
 
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
@@ -459,7 +477,7 @@ async function startBot() {
             console.error('[ERROR MENSAJE]', err);
         }
     });
-
+}
 
 // Inicializar todo
 startBot();
