@@ -317,6 +317,15 @@ async function handleTestCadena(sock, from, originalMsg) {
 }
 
 // ==========================================
+// FUNCIÓN AUXILIAR: Normalizar números de Argentina
+// ==========================================
+// Borra '+', espacios y transforma '549' en '54' para que las comparaciones sean idénticas
+const normalizarNumero = (num) => {
+    if (!num) return '';
+    return num.replace(/[^0-9]/g, '').replace(/^549/, '54');
+};
+
+// ==========================================
 // 5. INICIALIZACIÓN MONGODB Y WHATSAPP
 // ==========================================
 async function startBot() {
@@ -327,7 +336,7 @@ async function startBot() {
         await mongoClient.connect();
         console.log('[SISTEMA] Conexión a MongoDB exitosa. ✅');
     } catch (err) {
-        console.error('[❌ ERROR CRÍTICO] No se pudo conectar a MongoDB. Revisá que el Clúster esté Reanudado y la contraseña sea correcta.', err);
+        console.error('[❌ ERROR CRÍTICO] No se pudo conectar a MongoDB.', err);
         return; 
     }
 
@@ -359,10 +368,9 @@ async function startBot() {
             else if (content.image && content.caption) content.caption = `[¡+!]\n${content.caption}`;
         }
         
-        // SOLUCIÓN AL BUG DEL CHAT PRIVADO: Si nos estamos enviando un mensaje a nosotros mismos,
-        // eliminamos el parámetro 'quoted' (la cita) para evitar que WhatsApp rechace el mensaje.
-        const cleanJid = jid.split('@')[0].replace(/^549/, '54');
-        const cleanHost = HOST_NUMBER.replace(/^549/, '54');
+        // SOLUCIÓN AL BUG DEL CHAT PRIVADO: Si nos hablamos a nosotros mismos, quitamos el 'quoted'
+        const cleanJid = normalizarNumero(jid);
+        const cleanHost = normalizarNumero(HOST_NUMBER);
         if (cleanJid === cleanHost && options && options.quoted) {
             delete options.quoted;
         }
@@ -379,10 +387,7 @@ async function startBot() {
             if (debeReiniciar) {
                 console.log('[SISTEMA] Conexión cerrada. Reintentando en 10 segundos...');
                 setTimeout(() => startBot(), 10000); 
-            } else {
-                console.log('[❌ CRÍTICO] Sesión cerrada. Tendrás que vaciar la colección en MongoDB para vincular nuevamente.');
-            }
-            return;
+            } return;
         }
         
         if (connection === 'open') {
@@ -394,9 +399,7 @@ async function startBot() {
         if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
             codigoSolicitado = true; 
             setTimeout(async () => {
-                if (sock.authState.creds.registered) {
-                    codigoSolicitado = false; return;
-                }
+                if (sock.authState.creds.registered) { codigoSolicitado = false; return; }
                 try {
                     let code = await sock.requestPairingCode(HOST_NUMBER.replace(/[^0-9]/g, ''));
                     console.log(`\n🔥 TU CÓDIGO DE VINCULACIÓN ACTUAL: ${code?.match(/.{1,4}/g)?.join('-').toUpperCase() || code} 🔥\n`);
@@ -415,37 +418,32 @@ async function startBot() {
             
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
             
-            // 1. Ignorar cualquier mensaje que tenga la marca del bot (Previene el bucle infinito)
             if (text.startsWith('[¡+!]')) return;
-
-            // 2. Si el mensaje no empieza con '/', lo ignoramos (No es un comando)
             if (!text.startsWith('/')) return;
 
             const from = msg.key.remoteJid;
             const isMe = msg.key.fromMe; 
 
-            // Normalizamos los números quitando el prefijo argentino '9' para comparar correctamente
-            const cleanFrom = from.split('@')[0].replace(/^549/, '54');
-            const cleanHost = HOST_NUMBER.replace(/^549/, '54');
+            // Normalización ultra-segura de los números
+            const cleanFrom = normalizarNumero(from);
+            const cleanHost = normalizarNumero(HOST_NUMBER);
             const isSelfChat = cleanFrom === cleanHost;
 
-            // 3. Filtro inteligente: Permitir si el comando viene de vos mismo (isMe), 
-            // si estás en tu propio chat privado (isSelfChat), o si el ID del chat coincide con ALLOWED_CHATS
-            const isChatAllowed = isMe || isSelfChat || ALLOWED_CHATS.some(id => id.split('@')[0].replace(/^549/, '54') === cleanFrom);
+            // Filtro de chats: pasa si eres tú (isMe), tu propio chat privado (isSelfChat) o está en ALLOWED_CHATS
+            const isChatAllowed = isMe || isSelfChat || ALLOWED_CHATS.some(id => normalizarNumero(id) === cleanFrom);
             
             if (!isChatAllowed) return;
 
             // Definimos el sender real
-            let sender = (isMe || isSelfChat) ? `${HOST_NUMBER}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
+            let sender = (isMe || isSelfChat) ? `${cleanHost}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             
             const parts = text.split(' ');
             const command = parts[0].toLowerCase();
             const originalCommand = parts[0]; 
             const args = parts.slice(1).join(' ');
             
-            // Sos admin si eres el dueño de la cuenta o estás en la lista ADMINS
-            const cleanSender = sender.split('@')[0].replace(/^549/, '54');
-            const isAdmin = isMe || isSelfChat || ADMINS.some(admin => admin.split('@')[0].replace(/^549/, '54') === cleanSender);
+            const cleanSender = normalizarNumero(sender);
+            const isAdmin = isMe || isSelfChat || ADMINS.some(admin => normalizarNumero(admin) === cleanSender);
 
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
@@ -456,8 +454,8 @@ async function startBot() {
                 '/off': () => { botEnabled = false; return sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: msg }); },
                 '/+18on': () => { nsfwEnabled = true; return sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); },
                 '/+18off': () => { nsfwEnabled = false; return sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); },
-                '/modotrucadoon': () => { modoTrucado = true; return sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); },
-                '/modotrucadooff': () => { modoTrucado = false; return sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); }
+                '/modotrucadoon': () => { modoTrucado = true; return sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { msg }); },
+                '/modotrucadooff': () => { modoTrucado = false; return sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { msg }); }
             };
 
             const comandosPublicos = {
@@ -479,5 +477,4 @@ async function startBot() {
     });
 }
 
-// Inicializar todo
 startBot();
