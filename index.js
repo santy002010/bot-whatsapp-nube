@@ -445,7 +445,6 @@ const comandosPublicos = {
     '/test': () => handleTestCadena(sock, from, msg)
 };
 
-// 👇 Este bloque es el que faltaba
 if (isAdmin && comandosAdmin[command]) {
     await comandosAdmin[command]();
 } else if (comandosPublicos[command]) {
@@ -455,7 +454,6 @@ if (isAdmin && comandosAdmin[command]) {
 } catch (err) {
     console.error('[ERROR MENSAJE]', err);
 }
-});
+}); // 👈 cierre del sock.ev.on('messages.upsert', ...)
 
-// 🚀 Inicio del bot
-startBot();
+startBot(); // 👈 inicio del bot
