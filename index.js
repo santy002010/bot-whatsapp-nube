@@ -445,7 +445,7 @@ const comandosPublicos = {
     '/test': () => handleTestCadena(sock, from, msg)
 };
 
-            if (isAdmin && comandosAdmin[command]) {
+if (isAdmin && comandosAdmin[command]) {
     await comandosAdmin[command]();
 } else if (comandosPublicos[command]) {
     await comandosPublicos[command]();
