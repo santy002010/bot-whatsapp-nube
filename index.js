@@ -445,13 +445,15 @@ const comandosPublicos = {
     '/test': () => handleTestCadena(sock, from, msg)
 };
 
-            if (isAdmin && comandosAdmin[command]) await comandosAdmin[command]();
-            else if (comandosPublicos[command]) await comandosPublicos[command]();
-            
-        } catch (err) {
-            console.error('[ERROR MENSAJE]', err);
-        }
-    });
+            if (isAdmin && comandosAdmin[command]) {
+    await comandosAdmin[command]();
+} else if (comandosPublicos[command]) {
+    await comandosPublicos[command]();
 }
 
-startBot();
+} catch (err) {
+    console.error('[ERROR MENSAJE]', err);
+}
+}); // 👈 cierre correcto del sock.ev.on('messages.upsert', ...)
+
+startBot(); // 👈 inicio del bot
