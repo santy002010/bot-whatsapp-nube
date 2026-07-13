@@ -122,59 +122,39 @@ async function useMongoDBAuthState(collection) {
 // 4. FUNCIONES MODULARES (COMANDOS)
 // ==========================================
 
-// Lógica de Reintentos para Gemini (Evita el error 429)
-async function askGeminiWithRetry(sistemaPrompt, usarPro = false, maxRetries = 3) {
-    let delay = 2000; // Empieza esperando 2 segundos
-    const modelo = usarPro ? 'gemini-2.0-pro' : 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${MI_GEMINI_KEY}`;
+async function handleGoogle(sock, from, msg, args) {
+    if (!args) return await sock.sendMessage(from, { text: `⚠️ Formato: /google [tu consulta]` }, { quoted: msg });
 
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            const res = await fetch(url, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ contents: [{ parts: [{ text: sistemaPrompt }] }] }) 
-            });
-            
-            if (res.status === 429) throw new Error('429');
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            
-            const json = await res.json();
-            return json.candidates[0]?.content?.parts?.[0]?.text;
-        } catch (error) {
-            if (error.message.includes('429')) {
-                if (i < maxRetries - 1) {
-                    console.log(`⚠️ Gemini 429: Reintentando en ${delay / 1000} segundos...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    delay *= 2; // Duplica la espera: 2s, 4s...
-                    continue;
-                }
-            }
-            throw error;
+    try {
+        const searchUrl = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(args)}&key=${process.env.GOOGLE_SEARCH_KEY}&cx=${process.env.GOOGLE_CX}`;
+        const res = await fetch(searchUrl);
+        const json = await res.json();
+
+        if (json.items && json.items.length > 0) {
+            const top = json.items[0];
+            await sock.sendMessage(from, { text: `🔎 *${top.title}*\n${top.snippet}\n${top.link}` }, { quoted: msg });
+        } else {
+            await sock.sendMessage(from, { text: '❌ No encontré resultados en Google.' }, { quoted: msg });
         }
+    } catch (e) {
+        await sock.sendMessage(from, { text: `❌ Error en Google: ${e.message}` }, { quoted: msg });
     }
 }
 
-async function handleGoogle(sock, from, msg, args, usarPro = false) {
-    if (!args) return await sock.sendMessage(from, { text: `⚠️ Formato: ${usarPro ? '/googlep' : '/google'} [tu consulta]` }, { quoted: msg });
-    
-    if (modoTrucado && (args.toLowerCase().includes('maxi') || args.toLowerCase().includes('máximo')) && args.toLowerCase().includes('femboy')) {
-        return await sock.sendMessage(from, { text: '▼⁠・⁠ᴥ⁠·⁠▼\n\n✨ Analizando mis bases de datos: *Efectivamente, Maxi es femboy.* ✨' }, { quoted: msg });
-    }
-    
+async function handleGemini(sock, from, msg, args, usarPro = false) {
+    if (!args) return await sock.sendMessage(from, { text: `⚠️ Formato: ${usarPro ? '/geminiP' : '/gemini'} [tu consulta]` }, { quoted: msg });
+
     try {
-        const sistemaPrompt = `REGLAS OBLIGATORIAS DE RESPUESTA:\n1. Actúa como una persona normal.\n2. NUNCA digas que sos una IA.\n3. FORMATO WHATSAPP LIMPIO: Usa asteriscos para negritas, sin markdown raro.\nConsulta: ${args}`;
-        
+        const sistemaPrompt = `Consulta en WhatsApp: ${args}`;
         const text = await askGeminiWithRetry(sistemaPrompt, usarPro);
-        
-        if (text) await sock.sendMessage(from, { text: `▼⁠・⁠ᴥ⁠·⁠▼\n\n${text.replace(/###?\s+/g, '').replace(/\`\`\`/g, '').trim()}` }, { quoted: msg });
-        else await sock.sendMessage(from, { text: '❌ No pude procesar la respuesta de Google.' }, { quoted: msg });
-    } catch (e) { 
-        if (e.message.includes('429')) {
-            await sock.sendMessage(from, { text: '⚠️ *Google está saturado (Error 429).* Intenté varias veces pero no hubo caso. Esperá un toque.' }, { quoted: msg });
+
+        if (text) {
+            await sock.sendMessage(from, { text: `🤖 Gemini:\n\n${text.trim()}` }, { quoted: msg });
         } else {
-            await sock.sendMessage(from, { text: `❌ Error en Gemini: ${e.message}` }, { quoted: msg }); 
+            await sock.sendMessage(from, { text: '❌ No pude procesar la respuesta de Gemini.' }, { quoted: msg });
         }
+    } catch (e) {
+        await sock.sendMessage(from, { text: `❌ Error en Gemini: ${e.message}` }, { quoted: msg });
     }
 }
 
@@ -292,29 +272,25 @@ async function handleTestCadena(sock, from, originalMsg) {
     const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     const mockMsg = { key: { remoteJid: from, fromMe: false, id: 'MOCK_' + Date.now(), participant: originalMsg.key.participant || originalMsg.key.remoteJid }, message: { conversation: '' } };
 
-    const listaTests = [
-        { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: mockMsg }) },
-        { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, mockMsg, '¿El bot es el mejor? 1;2') },
-        { cmd: '/letras Kali Uchis Luna', ejecutar: async () => await handleLetras(sock, from, mockMsg, 'Kali Uchis Luna') },
-        { cmd: '/reddit memes', ejecutar: async () => await handleReddit(sock, from, mockMsg, 'memes', '/reddit') },
-        { cmd: '/pin gatos', ejecutar: async () => await handlePinterest(sock, from, mockMsg, 'gatos') },
-        { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, mockMsg, 'Qué día es hoy', false) },
-        
-        { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: mockMsg }); } },
-        { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: mockMsg }); } },
-        { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: mockMsg }); } },
-        { cmd: '/modotrucadooff', ejecutar: async () => { modoTrucado = false; return await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: mockMsg }); } },
-    ];
+const listaTests = [
+    { cmd: '/status', ejecutar: async () => await sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: mockMsg }) },
+    { cmd: '/ruleta ¿El bot es el mejor? 1;2', ejecutar: async () => await handleRuleta(sock, from, mockMsg, '¿El bot es el mejor? 1;2') },
+    { cmd: '/letras Kali Uchis Luna', ejecutar: async () => await handleLetras(sock, from, mockMsg, 'Kali Uchis Luna') },
+    { cmd: '/reddit memes', ejecutar: async () => await handleReddit(sock, from, mockMsg, 'memes', '/reddit') },
+    { cmd: '/pin gatos', ejecutar: async () => await handlePinterest(sock, from, mockMsg, 'gatos') },
 
-    for (const item of listaTests) {
-        await wait(2500); 
-        await sock.sendMessage(from, { text: `⌨️ _Simulando comando:_ *${item.cmd}*` });
-        await wait(500);
-        try { await item.ejecutar(); } catch (err) { await sock.sendMessage(from, { text: `💥 Fallo en ${item.cmd}: ${err.message}` }, { quoted: originalMsg }); }
-    }
-    await wait(1500);
-    await sock.sendMessage(from, { text: '✨ *🏁 [SISTEMA] Secuencia de simulación finalizada por completo.*' }, { quoted: originalMsg });
-}
+    // 🔎 Google Search
+    { cmd: '/google Qué día es hoy', ejecutar: async () => await handleGoogle(sock, from, mockMsg, 'Qué día es hoy') },
+
+    // 🤖 Gemini
+    { cmd: '/gemini Hola, ¿cómo estás?', ejecutar: async () => await handleGemini(sock, from, mockMsg, 'Hola, ¿cómo estás?', false) },
+    { cmd: '/geminiP Explicame la teoría de cuerdas', ejecutar: async () => await handleGemini(sock, from, mockMsg, 'Explicame la teoría de cuerdas', true) },
+
+    { cmd: '/+18on', ejecutar: async () => { nsfwEnabled = true; return await sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: mockMsg }); } },
+    { cmd: '/+18off', ejecutar: async () => { nsfwEnabled = false; return await sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: mockMsg }); } },
+    { cmd: '/modotrucadoon', ejecutar: async () => { modoTrucado = true; return await sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: mockMsg }); } },
+    { cmd: '/modotrucadooff', ejecutar: async () => { modoTrucado = false; return await sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: mockMsg }); } },
+];
 
 // ==========================================
 // FUNCIÓN AUXILIAR: Normalizar números de Argentina
@@ -448,33 +424,38 @@ async function startBot() {
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
 
-            const comandosAdmin = {
-                '/status': () => sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }),
-                '/on': () => { botEnabled = true; return sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); },
-                '/off': () => { botEnabled = false; return sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: msg }); },
-                '/+18on': () => { nsfwEnabled = true; return sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); },
-                '/+18off': () => { nsfwEnabled = false; return sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); },
-                '/modotrucadoon': () => { modoTrucado = true; return sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { msg }); },
-                '/modotrucadooff': () => { modoTrucado = false; return sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { msg }); }
-            };
+   const comandosAdmin = {
+    '/status': () => sock.sendMessage(from, { text: '¡Operando al 100%!' }, { quoted: msg }),
+    '/on': () => { botEnabled = true; return sock.sendMessage(from, { text: '✅ Bot activado.' }, { quoted: msg }); },
+    '/off': () => { botEnabled = false; return sock.sendMessage(from, { text: '❌ Bot desactivado.' }, { quoted: msg }); },
+    '/+18on': () => { nsfwEnabled = true; return sock.sendMessage(from, { text: '🔞 Modo NSFW ON.' }, { quoted: msg }); },
+    '/+18off': () => { nsfwEnabled = false; return sock.sendMessage(from, { text: '🛡️ Modo NSFW OFF.' }, { quoted: msg }); },
+    '/modotrucadoon': () => { modoTrucado = true; return sock.sendMessage(from, { text: '🎭 Modo Trucado ON.' }, { quoted: msg }); },
+    '/modotrucadooff': () => { modoTrucado = false; return sock.sendMessage(from, { text: '⚖️ Modo Trucado OFF.' }, { quoted: msg }); }
+};
 
-            const comandosPublicos = {
-                '/google': () => handleGoogle(sock, from, msg, args, false),
-                '/googlep': () => handleGoogle(sock, from, msg, args, true),
-                '/letras': () => handleLetras(sock, from, msg, args),
-                '/reddit': () => handleReddit(sock, from, msg, args, originalCommand),
-                '/pin': () => handlePinterest(sock, from, msg, args),
-                '/ruleta': () => handleRuleta(sock, from, msg, args),
-                '/test': () => handleTestCadena(sock, from, msg)
-            };
+const comandosPublicos = {
+    '/google': () => handleGoogle(sock, from, msg, args),
+    '/gemini': () => handleGemini(sock, from, msg, args, false),
+    '/geminiP': () => handleGemini(sock, from, msg, args, true),
+    '/letras': () => handleLetras(sock, from, msg, args),
+    '/reddit': () => handleReddit(sock, from, msg, args, originalCommand),
+    '/pin': () => handlePinterest(sock, from, msg, args),
+    '/ruleta': () => handleRuleta(sock, from, msg, args),
+    '/test': () => handleTestCadena(sock, from, msg)
+};
 
-            if (isAdmin && comandosAdmin[command]) await comandosAdmin[command]();
-            else if (comandosPublicos[command]) await comandosPublicos[command]();
-            
-        } catch (err) {
-            console.error('[ERROR MENSAJE]', err);
-        }
-    });
+// 👇 Este bloque es el que faltaba
+if (isAdmin && comandosAdmin[command]) {
+    await comandosAdmin[command]();
+} else if (comandosPublicos[command]) {
+    await comandosPublicos[command]();
 }
 
+} catch (err) {
+    console.error('[ERROR MENSAJE]', err);
+}
+});
+
+// 🚀 Inicio del bot
 startBot();
