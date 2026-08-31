@@ -23,6 +23,9 @@ app.listen(PORT, () => {
     console.log(`[EXPRESS] Servidor listo en el puerto ${PORT}`);
 });
 
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || 'https://bot-whatsapp-nube.onrender.com';
+setInterval(() => { fetch(SELF_URL).catch(() => {}); }, 8 * 60 * 1000);
+
 const MONGO_URI = process.env.MONGO_URI;
 if (!MONGO_URI) {
     console.error('[ERROR] Falta la variable MONGO_URI en Render.');
@@ -53,6 +56,10 @@ function getBannedUsers() {
 }
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function esGrupoJid(jid) {
+    const t = String(jid || '');
+    return t.includes('@g.us') || t.includes('@broadcast');
 }
 
 async function useMongoDBAuthState(collection) {
@@ -119,11 +126,11 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
     throw ultimoError;
 }
 
-async function handleAyuda(sock, from, msg) {
-    const texto = ['Comandos disponibles:','/ayuda','/status','/google [texto]','/gemini [texto]','/geminiP [texto]','/letras [cancion]','/pin [texto]','/reddit [texto]','/ruleta [pregunta]','/test','','Solo admin: /on  /off'].join('\n');
+async function handleAyuda(sock, from) {
+    const texto = ['Comandos disponibles:','/ayuda','/google [texto]','/gemini [texto]','/geminiP [texto]','/letras [cancion]','/pin [texto]','/reddit [texto]','/ruleta [pregunta]','/test','','Solo admin / chat privado: /status  /on  /off'].join('\n');
     await sock.sendMessage(from, { text: texto });
 }
-async function handleGoogle(sock, from, msg, args) {
+async function handleGoogle(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /google [tu consulta]' });
     const key = process.env.GOOGLE_SEARCH_KEY;
     const cx = process.env.GOOGLE_CX;
@@ -139,7 +146,7 @@ async function handleGoogle(sock, from, msg, args) {
         await sock.sendMessage(from, { text: `Error en Google: ${err.message}` });
     }
 }
-async function handleGemini(sock, from, msg, args, usarPro = false) {
+async function handleGemini(sock, from, args, usarPro = false) {
     const comando = usarPro ? '/geminiP' : '/gemini';
     if (!args) return sock.sendMessage(from, { text: `Formato: ${comando} [tu consulta]` });
     try {
@@ -150,7 +157,7 @@ async function handleGemini(sock, from, msg, args, usarPro = false) {
         await sock.sendMessage(from, { text: `Error en Gemini: ${err.message}` });
     }
 }
-async function handleLetras(sock, from, msg, args) {
+async function handleLetras(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /letras [cancion]' });
     try {
         const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
@@ -164,7 +171,7 @@ async function handleLetras(sock, from, msg, args) {
         await sock.sendMessage(from, { text: 'Error al buscar la letra.' });
     }
 }
-async function handleReddit(sock, from, msg, args) {
+async function handleReddit(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /reddit [texto]' });
     try {
         const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
@@ -185,7 +192,7 @@ async function handleReddit(sock, from, msg, args) {
         await sock.sendMessage(from, { text: `Error con Reddit: ${err.message}. Render a veces bloquea esa web.` });
     }
 }
-async function handlePinterest(sock, from, msg, args) {
+async function handlePinterest(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /pin [texto]' });
     const key = process.env.GOOGLE_SEARCH_KEY;
     const cx = process.env.GOOGLE_CX || process.env.PINTEREST_CX || 'a24fe245ad6734e91';
@@ -203,12 +210,9 @@ async function handlePinterest(sock, from, msg, args) {
         await sock.sendMessage(from, { text: `Error en el buscador: ${err.message}` });
     }
 }
-async function handleRuleta(sock, from, msg, args) {
+async function handleRuleta(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Ejemplo: /ruleta Va a llover?\nO con chance: /ruleta Va a llover? 1;2' });
-    let pregunta = args;
-    let siChance = 1;
-    let totalChance = 2;
-    let tieneProbabilidad = false;
+    let pregunta = args, siChance = 1, totalChance = 2, tieneProbabilidad = false;
     const match = args.match(/(\d+);(\d+)\s*$/);
     if (match) {
         siChance = parseInt(match[1], 10);
@@ -225,12 +229,12 @@ async function handleTestCadena(sock, from) {
     await sock.sendMessage(from, { text: 'Iniciando prueba de comandos...' });
     const tests = [
         { nombre: '/status', run: () => sock.sendMessage(from, { text: 'Operando al 100%.' }) },
-        { nombre: '/ruleta', run: () => handleRuleta(sock, from, null, 'El bot responde? 1;1') },
-        { nombre: '/letras', run: () => handleLetras(sock, from, null, 'Kali Uchis Luna') },
-        { nombre: '/reddit', run: () => handleReddit(sock, from, null, 'memes') },
-        { nombre: '/pin', run: () => handlePinterest(sock, from, null, 'gatos') },
-        { nombre: '/google', run: () => handleGoogle(sock, from, null, 'que dia es hoy') },
-        { nombre: '/gemini', run: () => handleGemini(sock, from, null, 'Hola, como estas?', false) }
+        { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde? 1;1') },
+        { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
+        { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
+        { nombre: '/pin', run: () => handlePinterest(sock, from, 'gatos') },
+        { nombre: '/google', run: () => handleGoogle(sock, from, 'que dia es hoy') },
+        { nombre: '/gemini', run: () => handleGemini(sock, from, 'Hola, como estas?', false) }
     ];
     for (const test of tests) {
         try { await test.run(); } catch (err) {
@@ -271,9 +275,7 @@ async function startBot() {
             if (content.text) content.text = `[¡+!]\n${content.text}`;
             else if (content.image && content.caption) content.caption = `[¡+!]\n${content.caption}`;
         }
-        const jidTxt = String(jid || '');
-        const mismoChat = normalizarNumero(jid) === normalizarNumero(HOST_NUMBER) || jidTxt.includes('@lid');
-        if (mismoChat && options.quoted) delete options.quoted;
+        if (!esGrupoJid(jid) && options.quoted) delete options.quoted;
         return originalSendMessage(jid, content, options);
     };
     sock.ev.on('connection.update', async (update) => {
@@ -281,9 +283,9 @@ async function startBot() {
         if (connection === 'close') {
             codigoSolicitado = false;
             const status = lastDisconnect?.error?.output?.statusCode;
-            const debeReiniciar = status !== DisconnectReason.loggedOut;
-            if (debeReiniciar) {
-                console.log('[SISTEMA] Conexion cerrada. Reintento en 10 segundos...');
+            console.log('[SISTEMA] Conexion cerrada. codigo=', status);
+            if (status !== DisconnectReason.loggedOut) {
+                console.log('[SISTEMA] Reintento en 10 segundos...');
                 setTimeout(() => startBot(), 10000);
             } else {
                 console.log('[SISTEMA] Sesion cerrada en WhatsApp. Hay que vincular de nuevo.');
@@ -318,35 +320,36 @@ async function startBot() {
             const isMe = Boolean(msg.key.fromMe);
             const cleanFrom = normalizarNumero(from);
             const cleanHost = normalizarNumero(HOST_NUMBER);
-            const isSelfChat = isMe || cleanFrom === cleanHost;
-            const isChatAllowed = isSelfChat || ALLOWED_CHATS.some((id) => normalizarNumero(id) === cleanFrom);
+            const esGrupo = esGrupoJid(from);
+            const esChatPrivadoPropio = !esGrupo && (isMe || cleanFrom === cleanHost);
+            const isChatAllowed = esChatPrivadoPropio || ALLOWED_CHATS.some((id) => normalizarNumero(id) === cleanFrom);
             if (!isChatAllowed) {
                 console.log('[IGNORADO]', from, text.slice(0, 40));
                 return;
             }
-            const sender = isSelfChat ? `${cleanHost}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
+            const sender = esChatPrivadoPropio ? `${cleanHost}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             const parts = text.trim().split(/\s+/);
             const command = parts[0].toLowerCase();
             const args = parts.slice(1).join(' ');
-            const isAdmin = isSelfChat || ADMINS.some((admin) => normalizarNumero(admin) === normalizarNumero(sender));
-            console.log('[CMD]', command, 'from=', from, 'fromMe=', isMe, 'admin=', isAdmin);
+            const isAdmin = esChatPrivadoPropio || ADMINS.some((admin) => normalizarNumero(admin) === normalizarNumero(sender));
+            console.log('[CMD]', command, 'from=', from, 'privado=', esChatPrivadoPropio, 'admin=', isAdmin);
             if (getBannedUsers().includes(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
             const comandosAdmin = {
+                '/status': () => sock.sendMessage(from, { text: 'Operando al 100%.' }),
                 '/on': async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Bot activado.' }); },
                 '/off': async () => { botEnabled = false; await sock.sendMessage(from, { text: 'Bot desactivado.' }); }
             };
             const comandosPublicos = {
-                '/status': () => sock.sendMessage(from, { text: 'Operando al 100%.' }),
-                '/ayuda': () => handleAyuda(sock, from, msg),
-                '/help': () => handleAyuda(sock, from, msg),
-                '/google': () => handleGoogle(sock, from, msg, args),
-                '/gemini': () => handleGemini(sock, from, msg, args, false),
-                '/geminip': () => handleGemini(sock, from, msg, args, true),
-                '/letras': () => handleLetras(sock, from, msg, args),
-                '/reddit': () => handleReddit(sock, from, msg, args),
-                '/pin': () => handlePinterest(sock, from, msg, args),
-                '/ruleta': () => handleRuleta(sock, from, msg, args),
+                '/ayuda': () => handleAyuda(sock, from),
+                '/help': () => handleAyuda(sock, from),
+                '/google': () => handleGoogle(sock, from, args),
+                '/gemini': () => handleGemini(sock, from, args, false),
+                '/geminip': () => handleGemini(sock, from, args, true),
+                '/letras': () => handleLetras(sock, from, args),
+                '/reddit': () => handleReddit(sock, from, args),
+                '/pin': () => handlePinterest(sock, from, args),
+                '/ruleta': () => handleRuleta(sock, from, args),
                 '/test': () => handleTestCadena(sock, from)
             };
             if (isAdmin && comandosAdmin[command]) { await comandosAdmin[command](); return; }
