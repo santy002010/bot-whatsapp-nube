@@ -40,21 +40,18 @@ const GROUP_ID = process.env.GROUP_ID || '120363426591951143@g.us';
 const ALLOWED_CHATS = [GROUP_ID, `${HOST_NUMBER}@s.whatsapp.net`];
 const ADMINS = [`${HOST_NUMBER}@s.whatsapp.net`, `${EXTRA_ADMIN}@s.whatsapp.net`];
 const AUTH_DIR = path.join(__dirname, 'config_local');
-const BANNED_FILE = path.join(AUTH_DIR, 'baneados.json');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 let botEnabled = true;
 let codigoSolicitado = false;
 let sockActivo = null;
+let banCol = null;
+let bannedCache = [];
 const vistos = new Set();
 
 function normalizarNumero(valor) {
     if (!valor) return '';
     return String(valor).replace(/[^0-9]/g, '').replace(/^549/, '54');
-}
-function getBannedUsers() {
-    if (!fs.existsSync(BANNED_FILE)) return [];
-    try { return JSON.parse(fs.readFileSync(BANNED_FILE, 'utf8')); } catch (_err) { return []; }
 }
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,6 +69,27 @@ function yaVisto(id) {
         vistos.delete(primero);
     }
     return false;
+}
+function esAdminNumero(num) {
+    const n = normalizarNumero(num);
+    return ADMINS.some((admin) => normalizarNumero(admin) === n) || n === normalizarNumero(HOST_NUMBER);
+}
+function estaBaneado(sender) {
+    const n = normalizarNumero(sender);
+    return bannedCache.some((b) => normalizarNumero(b) === n);
+}
+async function persistBanned() {
+    if (!banCol) return;
+    await banCol.deleteMany({});
+    if (bannedCache.length) {
+        await banCol.insertMany(bannedCache.map((numero) => ({ numero })));
+    }
+}
+function numeroDeComando(args, msg) {
+    const citado = msg?.message?.extendedTextMessage?.contextInfo?.participant
+        || msg?.message?.extendedTextMessage?.contextInfo?.remoteJid
+        || '';
+    return normalizarNumero(args || citado);
 }
 
 async function useMongoDBAuthState(collection) {
@@ -141,24 +159,59 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
 }
 
 async function handleAyuda(sock, from) {
-    const texto = ['Comandos disponibles:','/ayuda','/google [texto]','/gemini [texto]','/geminiP [texto]','/letras [cancion]','/pin [texto]','/reddit [texto]','/ruleta [pregunta]','/ruleta [pregunta] 1;2','/test','','Solo admin / chat privado: /status  /on  /off'].join('\n');
+    const texto = [
+        'Comandos disponibles:',
+        '/ayuda',
+        '/google [texto]',
+        '/gemini [texto]',
+        '/geminiP [texto]',
+        '/letras [cancion]',
+        '/pin [texto]',
+        '/reddit [texto]',
+        '/ruleta [pregunta]',
+        '/ruleta [pregunta] 1;2',
+        '/test',
+        '',
+        'Solo admin:',
+        '/status  /on  /off',
+        '/ban [numero] o respondiendo un mensaje',
+        '/unban [numero]',
+        '/baneados'
+    ].join('\n');
     await sock.sendMessage(from, { text: texto });
+}
+async function handleBan(sock, from, msg, args) {
+    const num = numeroDeComando(args, msg);
+    if (!num) return sock.sendMessage(from, { text: 'Usa /ban 549... o responde un mensaje con /ban' });
+    if (esAdminNumero(num)) return sock.sendMessage(from, { text: 'No se puede banear a un admin.' });
+    if (estaBaneado(num)) return sock.sendMessage(from, { text: `${num} ya estaba baneado.` });
+    bannedCache.push(num);
+    await persistBanned();
+    await sock.sendMessage(from, { text: `Baneado: ${num}. Ya no puede usar el bot.` });
+}
+async function handleUnban(sock, from, msg, args) {
+    const num = numeroDeComando(args, msg);
+    if (!num) return sock.sendMessage(from, { text: 'Usa /unban 549...' });
+    const antes = bannedCache.length;
+    bannedCache = bannedCache.filter((b) => normalizarNumero(b) !== num);
+    if (bannedCache.length === antes) return sock.sendMessage(from, { text: `${num} no estaba baneado.` });
+    await persistBanned();
+    await sock.sendMessage(from, { text: `Desbaneado: ${num}` });
+}
+async function handleBaneados(sock, from) {
+    if (!bannedCache.length) return sock.sendMessage(from, { text: 'No hay nadie baneado.' });
+    await sock.sendMessage(from, { text: 'Baneados:\n' + bannedCache.map((n) => `- ${n}`).join('\n') });
 }
 async function handleGoogle(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /google [tu consulta]' });
     const key = process.env.GOOGLE_SEARCH_KEY;
     const cx = process.env.GOOGLE_CX;
-    if (!key || !cx) {
-        return sock.sendMessage(from, { text: 'Faltan en Render GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
-    }
+    if (!key || !cx) return sock.sendMessage(from, { text: 'Faltan en Render GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
     try {
         const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(args)}&key=${key}&cx=${cx}`;
         const res = await fetch(url);
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            const detalle = json?.error?.message || `HTTP ${res.status}`;
-            throw new Error(`${detalle}. Activa Custom Search JSON API en Google Cloud.`);
-        }
+        if (!res.ok) throw new Error((json?.error?.message || `HTTP ${res.status}`) + '. Activa Custom Search JSON API.');
         if (!json.items || json.items.length === 0) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
         const top = json.items[0];
         await sock.sendMessage(from, { text: `*${top.title}*\n${top.snippet}\n${top.link}` });
@@ -195,8 +248,7 @@ async function handleReddit(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /reddit [texto]' });
     try {
         let posts = [];
-        const redditUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=25&raw_json=1`;
-        const res = await fetch(redditUrl, { headers: { 'User-Agent': 'Mozilla/5.0 BotWhatsApp/2.1', Accept: 'application/json' } });
+        const res = await fetch(`https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=25&raw_json=1`, { headers: { 'User-Agent': 'Mozilla/5.0 BotWhatsApp/2.1', Accept: 'application/json' } });
         if (res.ok) {
             const json = await res.json();
             posts = (json?.data?.children || []).map((item) => item.data).filter((post) => post && !post.over_18);
@@ -206,21 +258,15 @@ async function handleReddit(sock, from, args) {
             if (alt.ok) {
                 const json = await alt.json();
                 posts = (json?.data || []).filter((post) => post && !post.over_18);
-            } else if (!res.ok) {
-                throw new Error(`Reddit HTTP ${res.status}. Render suele bloquear esa web.`);
-            }
+            } else if (!res.ok) throw new Error(`Reddit HTTP ${res.status}. Render suele bloquear esa web.`);
         }
         if (!posts.length) return sock.sendMessage(from, { text: 'Sin resultados aptos.' });
         const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
-        const permalink = post.permalink || '';
-        const extra = `\n\nr/${post.subreddit || '?'}\nhttps://reddit.com${permalink}`;
+        const extra = `\n\nr/${post.subreddit || '?'}\nhttps://reddit.com${post.permalink || ''}`;
         const urlImg = post.url || '';
         const esImagen = urlImg && (/\.(jpeg|jpg|gif|png)$/i.test(urlImg) || urlImg.includes('i.redd.it'));
         if (esImagen) await sock.sendMessage(from, { image: { url: urlImg }, caption: `*${post.title || args}*${extra}` });
-        else {
-            const texto = post.selftext ? `\n\n${String(post.selftext).slice(0, 500)}` : '';
-            await sock.sendMessage(from, { text: `*${post.title || args}*${texto}${extra}` });
-        }
+        else await sock.sendMessage(from, { text: `*${post.title || args}*${post.selftext ? '\n\n' + String(post.selftext).slice(0, 500) : ''}${extra}` });
     } catch (err) {
         await sock.sendMessage(from, { text: `Error con Reddit: ${err.message}` });
     }
@@ -234,12 +280,9 @@ async function handlePinterest(sock, from, args) {
         const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(args)}&searchType=image`;
         const res = await fetch(url);
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            const detalle = json?.error?.message || `HTTP ${res.status}`;
-            throw new Error(`${detalle}. Activa Custom Search JSON API e Image search en el CX.`);
-        }
+        if (!res.ok) throw new Error((json?.error?.message || `HTTP ${res.status}`) + '. Activa Custom Search JSON API e Image search.');
         const items = json.items || [];
-        if (items.length === 0) return sock.sendMessage(from, { text: 'No encontre imagenes.' });
+        if (!items.length) return sock.sendMessage(from, { text: 'No encontre imagenes.' });
         const imagen = items[Math.floor(Math.random() * items.length)].link;
         await sock.sendMessage(from, { image: { url: imagen }, caption: `Busqueda: *${args}*` });
     } catch (err) {
@@ -247,9 +290,7 @@ async function handlePinterest(sock, from, args) {
     }
 }
 async function handleRuleta(sock, from, args) {
-    if (!args) {
-        return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2\n\nSi no pones numeros, la chance es 1;2 (mitad y mitad).' });
-    }
+    if (!args) return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2\n\nSi no pones numeros, la chance es 1;2.' });
     let pregunta = args, siChance = 1, totalChance = 2;
     const match = args.match(/(\d+);(\d+)\s*$/);
     if (match) {
@@ -265,8 +306,11 @@ async function handleRuleta(sock, from, args) {
 async function handleTestCadena(sock, from) {
     await sock.sendMessage(from, { text: 'Iniciando prueba de comandos...' });
     const tests = [
-        { nombre: '/status (admin)', run: () => sock.sendMessage(from, { text: 'Admin /status: Operando al 100%.' }) },
-        { nombre: '/on (admin)', run: async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Admin /on: bot activado.' }); } },
+        { nombre: '/status', run: () => sock.sendMessage(from, { text: 'Admin /status: Operando al 100%.' }) },
+        { nombre: '/on', run: async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Admin /on: bot activado.' }); } },
+        { nombre: '/ban', run: () => sock.sendMessage(from, { text: 'Admin /ban listo. Uso: /ban 549... o responde un mensaje con /ban' }) },
+        { nombre: '/unban', run: () => sock.sendMessage(from, { text: 'Admin /unban listo. Uso: /unban 549...' }) },
+        { nombre: '/baneados', run: () => handleBaneados(sock, from) },
         { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde?') },
         { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
         { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
@@ -311,6 +355,13 @@ async function startBot() {
     }
     const db = mongoClient.db(DB_NAME);
     const authCollection = db.collection(COLLECTION_NAME);
+    banCol = db.collection('baneados');
+    try {
+        const docs = await banCol.find({}).toArray();
+        bannedCache = docs.map((d) => d.numero).filter(Boolean);
+    } catch (_err) {
+        bannedCache = [];
+    }
     const { state, saveCreds } = await useMongoDBAuthState(authCollection);
     let version = [2, 3000, 1017551063];
     try { version = (await fetchLatestBaileysVersion()).version; } catch (_err) {
@@ -386,22 +437,22 @@ async function startBot() {
             const esGrupo = esGrupoJid(from);
             const esChatPrivadoPropio = !esGrupo && (isMe || cleanFrom === cleanHost);
             const isChatAllowed = esChatPrivadoPropio || ALLOWED_CHATS.some((id) => normalizarNumero(id) === cleanFrom);
-            if (!isChatAllowed) {
-                console.log('[IGNORADO]', from, text.slice(0, 40));
-                return;
-            }
+            if (!isChatAllowed) return;
             const sender = esChatPrivadoPropio ? `${cleanHost}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             const parts = text.trim().split(/\s+/);
             const command = parts[0].toLowerCase();
             const args = parts.slice(1).join(' ');
             const isAdmin = esChatPrivadoPropio || ADMINS.some((admin) => normalizarNumero(admin) === normalizarNumero(sender));
             console.log('[CMD]', command, 'from=', from, 'privado=', esChatPrivadoPropio, 'admin=', isAdmin);
-            if (getBannedUsers().includes(sender) && !isAdmin) return;
+            if (estaBaneado(sender) && !isAdmin) return;
             if (!botEnabled && !isAdmin) return;
             const comandosAdmin = {
                 '/status': () => sock.sendMessage(from, { text: 'Operando al 100%.' }),
                 '/on': async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Bot activado.' }); },
-                '/off': async () => { botEnabled = false; await sock.sendMessage(from, { text: 'Bot desactivado.' }); }
+                '/off': async () => { botEnabled = false; await sock.sendMessage(from, { text: 'Bot desactivado.' }); },
+                '/ban': () => handleBan(sock, from, msg, args),
+                '/unban': () => handleUnban(sock, from, msg, args),
+                '/baneados': () => handleBaneados(sock, from)
             };
             const comandosPublicos = {
                 '/ayuda': () => handleAyuda(sock, from),
