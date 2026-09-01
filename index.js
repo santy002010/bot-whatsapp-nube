@@ -124,8 +124,8 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
     if (!key || key === 'TU_API_KEY_AQUI') throw new Error('Falta GEMINI_KEY en Render');
     const genAI = new GoogleGenerativeAI(key);
     const modelo = usarPro
-        ? (process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro')
-        : (process.env.GEMINI_MODEL || 'gemini-2.5-flash');
+        ? (process.env.GEMINI_MODEL_PRO || 'gemini-3.6-flash')
+        : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
     let ultimoError;
     for (let i = 0; i <= reintentos; i++) {
         try {
@@ -149,13 +149,16 @@ async function handleGoogle(sock, from, args) {
     const key = process.env.GOOGLE_SEARCH_KEY;
     const cx = process.env.GOOGLE_CX;
     if (!key || !cx) {
-        return sock.sendMessage(from, { text: 'Faltan en Render las variables GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
+        return sock.sendMessage(from, { text: 'Faltan en Render GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
     }
     try {
         const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(args)}&key=${key}&cx=${cx}`;
         const res = await fetch(url);
-        const json = await res.json();
-        if (!res.ok) throw new Error(`Google Search HTTP ${res.status}`);
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = json?.error?.message || `HTTP ${res.status}`;
+            throw new Error(`${detalle}. Activa Custom Search JSON API en Google Cloud.`);
+        }
         if (!json.items || json.items.length === 0) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
         const top = json.items[0];
         await sock.sendMessage(from, { text: `*${top.title}*\n${top.snippet}\n${top.link}` });
@@ -230,8 +233,11 @@ async function handlePinterest(sock, from, args) {
     try {
         const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(args)}&searchType=image`;
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`Google Search HTTP ${res.status}. Revisa la API key y que Custom Search tenga imagenes activadas.`);
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const detalle = json?.error?.message || `HTTP ${res.status}`;
+            throw new Error(`${detalle}. Activa Custom Search JSON API e Image search en el CX.`);
+        }
         const items = json.items || [];
         if (items.length === 0) return sock.sendMessage(from, { text: 'No encontre imagenes.' });
         const imagen = items[Math.floor(Math.random() * items.length)].link;
@@ -244,18 +250,14 @@ async function handleRuleta(sock, from, args) {
     if (!args) {
         return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2\n\nSi no pones numeros, la chance es 1;2 (mitad y mitad).' });
     }
-    let pregunta = args, siChance = 1, totalChance = 2, tieneProbabilidad = false;
+    let pregunta = args, siChance = 1, totalChance = 2;
     const match = args.match(/(\d+);(\d+)\s*$/);
     if (match) {
         siChance = parseInt(match[1], 10);
         totalChance = parseInt(match[2], 10);
         pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
-        tieneProbabilidad = totalChance > 0;
     }
-    if (!tieneProbabilidad) {
-        siChance = 1;
-        totalChance = 2;
-    }
+    if (!totalChance) totalChance = 2;
     const numero = Math.floor(Math.random() * totalChance) + 1;
     const resultado = numero <= siChance ? 'si' : 'no';
     await sock.sendMessage(from, { text: `Ruleta: ${pregunta}\nChance: ${siChance};${totalChance}\nResultado: *${resultado}*` });
@@ -263,7 +265,8 @@ async function handleRuleta(sock, from, args) {
 async function handleTestCadena(sock, from) {
     await sock.sendMessage(from, { text: 'Iniciando prueba de comandos...' });
     const tests = [
-        { nombre: '/status', run: () => sock.sendMessage(from, { text: 'Operando al 100%.' }) },
+        { nombre: '/status (admin)', run: () => sock.sendMessage(from, { text: 'Admin /status: Operando al 100%.' }) },
+        { nombre: '/on (admin)', run: async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Admin /on: bot activado.' }); } },
         { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde?') },
         { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
         { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
