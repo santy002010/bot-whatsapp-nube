@@ -43,6 +43,7 @@ const AUTH_DIR = path.join(__dirname, 'config_local');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 let botEnabled = true;
+let soloAdmins = false;
 let codigoSolicitado = false;
 let sockActivo = null;
 let banCol = null;
@@ -81,9 +82,7 @@ function estaBaneado(sender) {
 async function persistBanned() {
     if (!banCol) return;
     await banCol.deleteMany({});
-    if (bannedCache.length) {
-        await banCol.insertMany(bannedCache.map((numero) => ({ numero })));
-    }
+    if (bannedCache.length) await banCol.insertMany(bannedCache.map((numero) => ({ numero })));
 }
 function numeroDeComando(args, msg) {
     const citado = msg?.message?.extendedTextMessage?.contextInfo?.participant
@@ -141,9 +140,7 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
     const key = process.env.GEMINI_KEY;
     if (!key || key === 'TU_API_KEY_AQUI') throw new Error('Falta GEMINI_KEY en Render');
     const genAI = new GoogleGenerativeAI(key);
-    const modelo = usarPro
-        ? (process.env.GEMINI_MODEL_PRO || 'gemini-3.6-flash')
-        : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
+    const modelo = usarPro ? (process.env.GEMINI_MODEL_PRO || 'gemini-3.6-flash') : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
     let ultimoError;
     for (let i = 0; i <= reintentos; i++) {
         try {
@@ -161,24 +158,26 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
 async function handleAyuda(sock, from) {
     const texto = [
         'Comandos disponibles:',
-        '/ayuda',
-        '/google [texto]',
-        '/gemini [texto]',
-        '/geminiP [texto]',
-        '/letras [cancion]',
-        '/pin [texto]',
-        '/reddit [texto]',
-        '/ruleta [pregunta]',
-        '/ruleta [pregunta] 1;2',
-        '/test',
+        '/ayuda /google /gemini /geminiP /letras /pin /reddit /ruleta /test',
         '',
         'Solo admin:',
         '/status  /on  /off',
+        '/admins on   (solo admins usan el bot)',
+        '/admins off  (todos los chats permitidos)',
         '/ban [numero] o respondiendo un mensaje',
         '/unban [numero]',
         '/baneados'
     ].join('\n');
     await sock.sendMessage(from, { text: texto });
+}
+async function handleStatus(sock, from) {
+    await sock.sendMessage(from, {
+        text: [
+            'Operando al 100%.',
+            `Bot: ${botEnabled ? 'prendido' : 'apagado para no admins'}`,
+            `Modo solo admins: ${soloAdmins ? 'ON' : 'OFF'}`
+        ].join('\n')
+    });
 }
 async function handleBan(sock, from, msg, args) {
     const num = numeroDeComando(args, msg);
@@ -212,7 +211,7 @@ async function handleGoogle(sock, from, args) {
         const res = await fetch(url);
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error((json?.error?.message || `HTTP ${res.status}`) + '. Activa Custom Search JSON API.');
-        if (!json.items || json.items.length === 0) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
+        if (!json.items || !json.items.length) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
         const top = json.items[0];
         await sock.sendMessage(from, { text: `*${top.title}*\n${top.snippet}\n${top.link}` });
     } catch (err) {
@@ -220,8 +219,7 @@ async function handleGoogle(sock, from, args) {
     }
 }
 async function handleGemini(sock, from, args, usarPro = false) {
-    const comando = usarPro ? '/geminiP' : '/gemini';
-    if (!args) return sock.sendMessage(from, { text: `Formato: ${comando} [tu consulta]` });
+    if (!args) return sock.sendMessage(from, { text: `Formato: ${usarPro ? '/geminiP' : '/gemini'} [tu consulta]` });
     try {
         const text = await askGeminiWithRetry(args, usarPro);
         if (!text) return sock.sendMessage(from, { text: 'Gemini no devolvio texto.' });
@@ -235,11 +233,10 @@ async function handleLetras(sock, from, args) {
     try {
         const res = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(args)}`);
         const data = await res.json();
-        if (!data || data.length === 0) return sock.sendMessage(from, { text: 'No encontre la letra.' });
+        if (!data || !data.length) return sock.sendMessage(from, { text: 'No encontre la letra.' });
         const track = data[0];
         const letra = track.syncedLyrics ? track.syncedLyrics.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim() : track.plainLyrics;
-        const cuerpo = `*${track.trackName}* - ${track.artistName}\n\n${letra || 'Sin letra.'}`;
-        await sock.sendMessage(from, { text: cuerpo.substring(0, 4000) });
+        await sock.sendMessage(from, { text: (`*${track.trackName}* - ${track.artistName}\n\n${letra || 'Sin letra.'}`).substring(0, 4000) });
     } catch (_err) {
         await sock.sendMessage(from, { text: 'Error al buscar la letra.' });
     }
@@ -283,14 +280,13 @@ async function handlePinterest(sock, from, args) {
         if (!res.ok) throw new Error((json?.error?.message || `HTTP ${res.status}`) + '. Activa Custom Search JSON API e Image search.');
         const items = json.items || [];
         if (!items.length) return sock.sendMessage(from, { text: 'No encontre imagenes.' });
-        const imagen = items[Math.floor(Math.random() * items.length)].link;
-        await sock.sendMessage(from, { image: { url: imagen }, caption: `Busqueda: *${args}*` });
+        await sock.sendMessage(from, { image: { url: items[Math.floor(Math.random() * items.length)].link }, caption: `Busqueda: *${args}*` });
     } catch (err) {
         await sock.sendMessage(from, { text: `Error en el buscador: ${err.message}` });
     }
 }
 async function handleRuleta(sock, from, args) {
-    if (!args) return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2\n\nSi no pones numeros, la chance es 1;2.' });
+    if (!args) return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2' });
     let pregunta = args, siChance = 1, totalChance = 2;
     const match = args.match(/(\d+);(\d+)\s*$/);
     if (match) {
@@ -300,17 +296,14 @@ async function handleRuleta(sock, from, args) {
     }
     if (!totalChance) totalChance = 2;
     const numero = Math.floor(Math.random() * totalChance) + 1;
-    const resultado = numero <= siChance ? 'si' : 'no';
-    await sock.sendMessage(from, { text: `Ruleta: ${pregunta}\nChance: ${siChance};${totalChance}\nResultado: *${resultado}*` });
+    await sock.sendMessage(from, { text: `Ruleta: ${pregunta}\nChance: ${siChance};${totalChance}\nResultado: *${numero <= siChance ? 'si' : 'no'}*` });
 }
 async function handleTestCadena(sock, from) {
     await sock.sendMessage(from, { text: 'Iniciando prueba de comandos...' });
     const tests = [
-        { nombre: '/status', run: () => sock.sendMessage(from, { text: 'Admin /status: Operando al 100%.' }) },
-        { nombre: '/on', run: async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Admin /on: bot activado.' }); } },
-        { nombre: '/ban', run: () => sock.sendMessage(from, { text: 'Admin /ban listo. Uso: /ban 549... o responde un mensaje con /ban' }) },
-        { nombre: '/unban', run: () => sock.sendMessage(from, { text: 'Admin /unban listo. Uso: /unban 549...' }) },
-        { nombre: '/baneados', run: () => handleBaneados(sock, from) },
+        { nombre: '/status', run: () => handleStatus(sock, from) },
+        { nombre: '/admins', run: () => sock.sendMessage(from, { text: `Modo solo admins ahora: ${soloAdmins ? 'ON' : 'OFF'}` }) },
+        { nombre: '/ban', run: () => sock.sendMessage(from, { text: 'Admin /ban listo. Uso: /ban 549... o responde un mensaje' }) },
         { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde?') },
         { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
         { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
@@ -359,9 +352,7 @@ async function startBot() {
     try {
         const docs = await banCol.find({}).toArray();
         bannedCache = docs.map((d) => d.numero).filter(Boolean);
-    } catch (_err) {
-        bannedCache = [];
-    }
+    } catch (_err) { bannedCache = []; }
     const { state, saveCreds } = await useMongoDBAuthState(authCollection);
     let version = [2, 3000, 1017551063];
     try { version = (await fetchLatestBaileysVersion()).version; } catch (_err) {
@@ -394,14 +385,10 @@ async function startBot() {
             const status = lastDisconnect?.error?.output?.statusCode;
             console.log('[SISTEMA] Conexion cerrada. codigo=', status);
             if (status === DisconnectReason.loggedOut || status === 401) {
-                console.log('[SISTEMA] Sesion invalida. Borro credenciales y pido codigo nuevo...');
-                try { await authCollection.deleteMany({}); } catch (err) {
-                    console.error('[ERROR] No pude borrar la sesion:', err.message || err);
-                }
+                try { await authCollection.deleteMany({}); } catch (_err) {}
                 setTimeout(() => startBot(), 3000);
                 return;
             }
-            console.log('[SISTEMA] Reintento en 10 segundos...');
             setTimeout(() => startBot(), 10000);
             return;
         }
@@ -443,13 +430,24 @@ async function startBot() {
             const command = parts[0].toLowerCase();
             const args = parts.slice(1).join(' ');
             const isAdmin = esChatPrivadoPropio || ADMINS.some((admin) => normalizarNumero(admin) === normalizarNumero(sender));
-            console.log('[CMD]', command, 'from=', from, 'privado=', esChatPrivadoPropio, 'admin=', isAdmin);
             if (estaBaneado(sender) && !isAdmin) return;
-            if (!botEnabled && !isAdmin) return;
+            if (!isAdmin && (!botEnabled || soloAdmins)) return;
             const comandosAdmin = {
-                '/status': () => sock.sendMessage(from, { text: 'Operando al 100%.' }),
-                '/on': async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Bot activado.' }); },
-                '/off': async () => { botEnabled = false; await sock.sendMessage(from, { text: 'Bot desactivado.' }); },
+                '/status': () => handleStatus(sock, from),
+                '/on': async () => { botEnabled = true; await sock.sendMessage(from, { text: 'Bot activado para todos los chats permitidos.' }); },
+                '/off': async () => { botEnabled = false; await sock.sendMessage(from, { text: 'Bot apagado. Solo admins pueden usarlo.' }); },
+                '/admins': async () => {
+                    const modo = args.trim().toLowerCase();
+                    if (modo === 'on' || modo === 'si') {
+                        soloAdmins = true;
+                        await sock.sendMessage(from, { text: 'Modo solo admins ON. El resto no puede usar el bot.' });
+                    } else if (modo === 'off' || modo === 'no') {
+                        soloAdmins = false;
+                        await sock.sendMessage(from, { text: 'Modo solo admins OFF. Los chats permitidos pueden usar el bot.' });
+                    } else {
+                        await sock.sendMessage(from, { text: `Modo solo admins: ${soloAdmins ? 'ON' : 'OFF'}\nUsa /admins on o /admins off` });
+                    }
+                },
                 '/ban': () => handleBan(sock, from, msg, args),
                 '/unban': () => handleUnban(sock, from, msg, args),
                 '/baneados': () => handleBaneados(sock, from)
