@@ -45,6 +45,8 @@ if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 let botEnabled = true;
 let codigoSolicitado = false;
+let sockActivo = null;
+const vistos = new Set();
 
 function normalizarNumero(valor) {
     if (!valor) return '';
@@ -60,6 +62,16 @@ function wait(ms) {
 function esGrupoJid(jid) {
     const t = String(jid || '');
     return t.includes('@g.us') || t.includes('@broadcast');
+}
+function yaVisto(id) {
+    if (!id) return false;
+    if (vistos.has(id)) return true;
+    vistos.add(id);
+    if (vistos.size > 400) {
+        const primero = vistos.values().next().value;
+        vistos.delete(primero);
+    }
+    return false;
 }
 
 async function useMongoDBAuthState(collection) {
@@ -111,7 +123,9 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
     const key = process.env.GEMINI_KEY;
     if (!key || key === 'TU_API_KEY_AQUI') throw new Error('Falta GEMINI_KEY en Render');
     const genAI = new GoogleGenerativeAI(key);
-    const modelo = usarPro ? (process.env.GEMINI_MODEL_PRO || 'gemini-1.5-pro') : (process.env.GEMINI_MODEL || 'gemini-1.5-flash');
+    const modelo = usarPro
+        ? (process.env.GEMINI_MODEL_PRO || 'gemini-2.5-pro')
+        : (process.env.GEMINI_MODEL || 'gemini-2.5-flash');
     let ultimoError;
     for (let i = 0; i <= reintentos; i++) {
         try {
@@ -127,18 +141,21 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
 }
 
 async function handleAyuda(sock, from) {
-    const texto = ['Comandos disponibles:','/ayuda','/google [texto]','/gemini [texto]','/geminiP [texto]','/letras [cancion]','/pin [texto]','/reddit [texto]','/ruleta [pregunta]','/test','','Solo admin / chat privado: /status  /on  /off'].join('\n');
+    const texto = ['Comandos disponibles:','/ayuda','/google [texto]','/gemini [texto]','/geminiP [texto]','/letras [cancion]','/pin [texto]','/reddit [texto]','/ruleta [pregunta]','/ruleta [pregunta] 1;2','/test','','Solo admin / chat privado: /status  /on  /off'].join('\n');
     await sock.sendMessage(from, { text: texto });
 }
 async function handleGoogle(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /google [tu consulta]' });
     const key = process.env.GOOGLE_SEARCH_KEY;
     const cx = process.env.GOOGLE_CX;
-    if (!key || !cx) return sock.sendMessage(from, { text: 'Faltan GOOGLE_SEARCH_KEY o GOOGLE_CX en Render.' });
+    if (!key || !cx) {
+        return sock.sendMessage(from, { text: 'Faltan en Render las variables GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
+    }
     try {
         const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(args)}&key=${key}&cx=${cx}`;
         const res = await fetch(url);
         const json = await res.json();
+        if (!res.ok) throw new Error(`Google Search HTTP ${res.status}`);
         if (!json.items || json.items.length === 0) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
         const top = json.items[0];
         await sock.sendMessage(from, { text: `*${top.title}*\n${top.snippet}\n${top.link}` });
@@ -174,33 +191,46 @@ async function handleLetras(sock, from, args) {
 async function handleReddit(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /reddit [texto]' });
     try {
-        const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=40&raw_json=1`;
-        const res = await fetch(url, { headers: { 'User-Agent': 'NodeJS:BotWhatsApp:v2.1.0', Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`Reddit respondio HTTP ${res.status}`);
-        const json = await res.json();
-        const posts = (json?.data?.children || []).map((item) => item.data).filter((post) => post && !post.over_18);
-        if (posts.length === 0) return sock.sendMessage(from, { text: 'Sin resultados aptos.' });
+        let posts = [];
+        const redditUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(args)}&limit=25&raw_json=1`;
+        const res = await fetch(redditUrl, { headers: { 'User-Agent': 'Mozilla/5.0 BotWhatsApp/2.1', Accept: 'application/json' } });
+        if (res.ok) {
+            const json = await res.json();
+            posts = (json?.data?.children || []).map((item) => item.data).filter((post) => post && !post.over_18);
+        }
+        if (!posts.length) {
+            const alt = await fetch(`https://api.pullpush.io/reddit/search/submission/?q=${encodeURIComponent(args)}&size=20`);
+            if (alt.ok) {
+                const json = await alt.json();
+                posts = (json?.data || []).filter((post) => post && !post.over_18);
+            } else if (!res.ok) {
+                throw new Error(`Reddit HTTP ${res.status}. Render suele bloquear esa web.`);
+            }
+        }
+        if (!posts.length) return sock.sendMessage(from, { text: 'Sin resultados aptos.' });
         const post = posts[Math.floor(Math.random() * Math.min(15, posts.length))];
-        const extra = `\n\nr/${post.subreddit}\nhttps://reddit.com${post.permalink}`;
-        const esImagen = post.url && (/\.(jpeg|jpg|gif|png)$/i.test(post.url) || post.url.includes('i.redd.it'));
-        if (esImagen) await sock.sendMessage(from, { image: { url: post.url }, caption: `*${post.title}*${extra}` });
+        const permalink = post.permalink || '';
+        const extra = `\n\nr/${post.subreddit || '?'}\nhttps://reddit.com${permalink}`;
+        const urlImg = post.url || '';
+        const esImagen = urlImg && (/\.(jpeg|jpg|gif|png)$/i.test(urlImg) || urlImg.includes('i.redd.it'));
+        if (esImagen) await sock.sendMessage(from, { image: { url: urlImg }, caption: `*${post.title || args}*${extra}` });
         else {
-            const texto = post.selftext ? `\n\n${post.selftext.slice(0, 500)}` : '';
-            await sock.sendMessage(from, { text: `*${post.title}*${texto}${extra}` });
+            const texto = post.selftext ? `\n\n${String(post.selftext).slice(0, 500)}` : '';
+            await sock.sendMessage(from, { text: `*${post.title || args}*${texto}${extra}` });
         }
     } catch (err) {
-        await sock.sendMessage(from, { text: `Error con Reddit: ${err.message}. Render a veces bloquea esa web.` });
+        await sock.sendMessage(from, { text: `Error con Reddit: ${err.message}` });
     }
 }
 async function handlePinterest(sock, from, args) {
     if (!args) return sock.sendMessage(from, { text: 'Formato: /pin [texto]' });
     const key = process.env.GOOGLE_SEARCH_KEY;
-    const cx = process.env.GOOGLE_CX || process.env.PINTEREST_CX || 'a24fe245ad6734e91';
-    if (!key) return sock.sendMessage(from, { text: 'Falta GOOGLE_SEARCH_KEY en Render.' });
+    const cx = process.env.GOOGLE_CX || process.env.PINTEREST_CX;
+    if (!key || !cx) return sock.sendMessage(from, { text: 'Faltan GOOGLE_SEARCH_KEY y GOOGLE_CX en Render.' });
     try {
         const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${encodeURIComponent(args)}&searchType=image`;
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`Google Search HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`Google Search HTTP ${res.status}. Revisa la API key y que Custom Search tenga imagenes activadas.`);
         const json = await res.json();
         const items = json.items || [];
         if (items.length === 0) return sock.sendMessage(from, { text: 'No encontre imagenes.' });
@@ -211,7 +241,9 @@ async function handlePinterest(sock, from, args) {
     }
 }
 async function handleRuleta(sock, from, args) {
-    if (!args) return sock.sendMessage(from, { text: 'Ejemplo: /ruleta Va a llover?\nO con chance: /ruleta Va a llover? 1;2' });
+    if (!args) {
+        return sock.sendMessage(from, { text: 'Ejemplo:\n/ruleta Va a llover?\n/ruleta Va a llover? 1;2\n\nSi no pones numeros, la chance es 1;2 (mitad y mitad).' });
+    }
     let pregunta = args, siChance = 1, totalChance = 2, tieneProbabilidad = false;
     const match = args.match(/(\d+);(\d+)\s*$/);
     if (match) {
@@ -220,16 +252,19 @@ async function handleRuleta(sock, from, args) {
         pregunta = args.replace(/(\d+);(\d+)\s*$/, '').trim();
         tieneProbabilidad = totalChance > 0;
     }
-    const numero = Math.floor(Math.random() * (tieneProbabilidad ? totalChance : 2)) + 1;
-    const resultado = (tieneProbabilidad ? numero <= siChance : numero === 1) ? 'si' : 'no';
-    const extra = tieneProbabilidad ? ` (chance ${siChance};${totalChance})` : '';
-    await sock.sendMessage(from, { text: `Ruleta: ${pregunta}\nResultado: *${resultado}*${extra}` });
+    if (!tieneProbabilidad) {
+        siChance = 1;
+        totalChance = 2;
+    }
+    const numero = Math.floor(Math.random() * totalChance) + 1;
+    const resultado = numero <= siChance ? 'si' : 'no';
+    await sock.sendMessage(from, { text: `Ruleta: ${pregunta}\nChance: ${siChance};${totalChance}\nResultado: *${resultado}*` });
 }
 async function handleTestCadena(sock, from) {
     await sock.sendMessage(from, { text: 'Iniciando prueba de comandos...' });
     const tests = [
         { nombre: '/status', run: () => sock.sendMessage(from, { text: 'Operando al 100%.' }) },
-        { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde? 1;1') },
+        { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde?') },
         { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
         { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
         { nombre: '/pin', run: () => handlePinterest(sock, from, 'gatos') },
@@ -249,7 +284,6 @@ async function pedirCodigo(sock) {
         const code = await sock.requestPairingCode(HOST_NUMBER);
         const lindo = code?.match(/.{1,4}/g)?.join('-').toUpperCase() || code;
         console.log(`\nCODIGO DE VINCULACION: ${lindo}\n`);
-        console.log('[SISTEMA] WhatsApp -> Dispositivos vinculados -> Vincular con el numero del bot');
         return lindo;
     } catch (err) {
         console.error('[ERROR] No pude pedir el codigo:', err.message || err);
@@ -259,6 +293,10 @@ async function pedirCodigo(sock) {
 }
 
 async function startBot() {
+    if (sockActivo) {
+        try { sockActivo.end(undefined); } catch (_err) {}
+        sockActivo = null;
+    }
     console.log('[SISTEMA] Conectando a MongoDB Atlas...');
     const mongoClient = new MongoClient(MONGO_URI);
     try {
@@ -284,6 +322,7 @@ async function startBot() {
         markOnlineOnConnect: false,
         syncFullHistory: false
     });
+    sockActivo = sock;
     sock.ev.on('creds.update', async () => { await saveCreds(); });
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options = {}) => {
@@ -328,8 +367,12 @@ async function startBot() {
     });
     sock.ev.on('messages.upsert', async (payload) => {
         try {
+            if (payload.type && payload.type !== 'notify') return;
             const msg = payload.messages?.[0];
             if (!msg?.message) return;
+            if (yaVisto(msg.key?.id)) return;
+            const ts = Number(msg.messageTimestamp || 0);
+            if (ts && (Date.now() / 1000 - ts) > 45) return;
             const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
             if (text.startsWith('[¡+!]')) return;
             if (!text.startsWith('/')) return;
