@@ -157,26 +157,34 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
 
 async function handleAyuda(sock, from) {
     const texto = [
-        'Comandos disponibles:',
-        '/ayuda /google /gemini /geminiP /letras /pin /reddit /ruleta /test',
+        '*Comandos*',
+        '/ayuda - esta lista',
+        '/google [texto] - buscar en Google',
+        '/gemini [texto] - preguntar a Gemini',
+        '/geminiP [texto] - Gemini (mismo modelo, comando extra)',
+        '/letras [cancion] - buscar letra',
+        '/pin [texto] - buscar imagen',
+        '/reddit [texto] - buscar en Reddit',
+        '/ruleta [pregunta] - si o no, chance 1;2',
+        '/ruleta [pregunta] 1;4 - chance personalizada',
+        '/test - probar comandos',
         '',
-        'Solo admin:',
-        '/status  /on  /off',
-        '/admins on   (solo admins usan el bot)',
-        '/admins off  (todos los chats permitidos)',
-        '/ban [numero] o respondiendo un mensaje',
-        '/unban [numero]',
-        '/baneados'
+        '*Solo admin*',
+        '/status - estado del bot',
+        '/on - prender el bot para todos',
+        '/off - apagar el bot (solo admins siguen)',
+        '/admins on - solo los admins pueden usar el bot',
+        '/admins off - todos los chats permitidos pueden usarlo',
+        '/admins - ver si el modo solo admins esta ON u OFF',
+        '/ban [numero] - prohibir el bot (o responde un mensaje y /ban)',
+        '/unban [numero] - quitar el ban',
+        '/baneados - lista de baneados'
     ].join('\n');
     await sock.sendMessage(from, { text: texto });
 }
 async function handleStatus(sock, from) {
     await sock.sendMessage(from, {
-        text: [
-            'Operando al 100%.',
-            `Bot: ${botEnabled ? 'prendido' : 'apagado para no admins'}`,
-            `Modo solo admins: ${soloAdmins ? 'ON' : 'OFF'}`
-        ].join('\n')
+        text: ['Operando al 100%.', `Bot: ${botEnabled ? 'prendido' : 'apagado para no admins'}`, `Modo solo admins: ${soloAdmins ? 'ON' : 'OFF'}`].join('\n')
     });
 }
 async function handleBan(sock, from, msg, args) {
