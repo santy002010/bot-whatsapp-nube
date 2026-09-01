@@ -244,6 +244,20 @@ async function handleTestCadena(sock, from) {
     }
 }
 
+async function pedirCodigo(sock) {
+    try {
+        const code = await sock.requestPairingCode(HOST_NUMBER);
+        const lindo = code?.match(/.{1,4}/g)?.join('-').toUpperCase() || code;
+        console.log(`\nCODIGO DE VINCULACION: ${lindo}\n`);
+        console.log('[SISTEMA] WhatsApp -> Dispositivos vinculados -> Vincular con el numero del bot');
+        return lindo;
+    } catch (err) {
+        console.error('[ERROR] No pude pedir el codigo:', err.message || err);
+        codigoSolicitado = false;
+        return null;
+    }
+}
+
 async function startBot() {
     console.log('[SISTEMA] Conectando a MongoDB Atlas...');
     const mongoClient = new MongoClient(MONGO_URI);
@@ -286,12 +300,16 @@ async function startBot() {
             codigoSolicitado = false;
             const status = lastDisconnect?.error?.output?.statusCode;
             console.log('[SISTEMA] Conexion cerrada. codigo=', status);
-            if (status !== DisconnectReason.loggedOut) {
-                console.log('[SISTEMA] Reintento en 10 segundos...');
-                setTimeout(() => startBot(), 10000);
-            } else {
-                console.log('[SISTEMA] Sesion cerrada en WhatsApp. Hay que vincular de nuevo.');
+            if (status === DisconnectReason.loggedOut || status === 401) {
+                console.log('[SISTEMA] Sesion invalida. Borro credenciales y pido codigo nuevo...');
+                try { await authCollection.deleteMany({}); } catch (err) {
+                    console.error('[ERROR] No pude borrar la sesion:', err.message || err);
+                }
+                setTimeout(() => startBot(), 3000);
+                return;
             }
+            console.log('[SISTEMA] Reintento en 10 segundos...');
+            setTimeout(() => startBot(), 10000);
             return;
         }
         if (connection === 'open') {
@@ -304,12 +322,8 @@ async function startBot() {
             codigoSolicitado = true;
             setTimeout(async () => {
                 if (sock.authState.creds.registered) { codigoSolicitado = false; return; }
-                try {
-                    const code = await sock.requestPairingCode(HOST_NUMBER);
-                    const lindo = code?.match(/.{1,4}/g)?.join('-').toUpperCase() || code;
-                    console.log(`\nCODIGO DE VINCULACION: ${lindo}\n`);
-                } catch (_err) { codigoSolicitado = false; }
-            }, 10000);
+                await pedirCodigo(sock);
+            }, 8000);
         }
     });
     sock.ev.on('messages.upsert', async (payload) => {
