@@ -266,7 +266,9 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome')
+        browser: Browsers.ubuntu('Chrome'),
+        markOnlineOnConnect: false,
+        syncFullHistory: false
     });
     sock.ev.on('creds.update', async () => { await saveCreds(); });
     const originalSendMessage = sock.sendMessage.bind(sock);
@@ -295,6 +297,7 @@ async function startBot() {
         if (connection === 'open') {
             console.log('[SISTEMA] Bot conectado a WhatsApp.');
             codigoSolicitado = false;
+            try { await sock.sendPresenceUpdate('unavailable'); } catch (_err) {}
             return;
         }
         if (!sock.authState.creds.registered && !codigoSolicitado && connection !== 'close') {
