@@ -391,13 +391,16 @@ async function startBot() {
     });
     sockActivo = sock;
     sock.ev.on('creds.update', async () => { await saveCreds(); });
+    let quotedMsg = null;
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (jid, content, options = {}) => {
         if (content && typeof content === 'object') {
             if (content.text) content.text = `[¡+!]\n${content.text}`;
             else if (content.image && content.caption) content.caption = `[¡+!]\n${content.caption}`;
         }
-        if (!esGrupoJid(jid) && options.quoted) delete options.quoted;
+        if (quotedMsg && !options.quoted && jid === quotedMsg.key?.remoteJid) {
+            options = { ...options, quoted: quotedMsg };
+        }
         return originalSendMessage(jid, content, options);
     };
     sock.ev.on('connection.update', async (update) => {
@@ -447,6 +450,7 @@ async function startBot() {
             const esChatPrivadoPropio = !esGrupo && (isMe || cleanFrom === cleanHost);
             const isChatAllowed = esChatPrivadoPropio || ALLOWED_CHATS.some((id) => normalizarNumero(id) === cleanFrom);
             if (!isChatAllowed) return;
+            quotedMsg = msg;
             const sender = esChatPrivadoPropio ? `${cleanHost}@s.whatsapp.net` : (msg.key.participant || msg.key.remoteJid);
             const parts = text.trim().split(/\s+/);
             const command = parts[0].toLowerCase();
