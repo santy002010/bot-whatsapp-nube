@@ -42,6 +42,21 @@ const ADMINS = [`${HOST_NUMBER}@s.whatsapp.net`, `${EXTRA_ADMIN}@s.whatsapp.net`
 const AUTH_DIR = path.join(__dirname, 'config_local');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
+const INSTRUCCION_GEMINI = [
+    'Respondes dentro de WhatsApp.',
+    'Escribe texto simple, corto y facil de leer en el celular.',
+    'No uses titulos con #.',
+    'No uses markdown de doble asterisco.',
+    'Si hace falta negrita, usa un solo asterisco de cada lado, asi: *esto*.',
+    'No armes tablas.',
+    'No pongas prefijos como Gemini, Respuesta o Asistente.',
+    'No empieces con hola si no te saludaron.',
+    'Separa ideas con renglones vacios.',
+    'Si enumeras, usa 1. 2. 3. o un punto medio, no guiones raros.',
+    'Responde en el mismo idioma de la pregunta.',
+    'Se claro y directo.'
+].join(' ');
+
 let botEnabled = true;
 let soloAdmins = false;
 let codigoSolicitado = false;
@@ -89,6 +104,16 @@ function numeroDeComando(args, msg) {
         || msg?.message?.extendedTextMessage?.contextInfo?.remoteJid
         || '';
     return normalizarNumero(args || citado);
+}
+function limpioWhatsApp(texto) {
+    return String(texto || '')
+        .replace(/^\s*(gemini\s*pro\s*:|gemini\s*:|respuesta\s*:)\s*/i, '')
+        .replace(/\*\*(.+?)\*\*/g, '*$1*')
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/```[\w+-]*\n?/g, '')
+        .replace(/^[ \t]*[-*]\s+/gm, '• ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 async function useMongoDBAuthState(collection) {
@@ -140,28 +165,35 @@ async function askGeminiWithRetry(prompt, usarPro = false, reintentos = 2) {
     const key = process.env.GEMINI_KEY;
     if (!key || key === 'TU_API_KEY_AQUI') throw new Error('Falta GEMINI_KEY en Render');
     const genAI = new GoogleGenerativeAI(key);
-    const modelo = usarPro ? (process.env.GEMINI_MODEL_PRO || 'gemini-3.6-flash') : (process.env.GEMINI_MODEL || 'gemini-3.6-flash');
+    const modelos = usarPro
+        ? [process.env.GEMINI_MODEL_PRO, 'gemini-3.1-pro-preview', 'gemini-3.6-flash'].filter(Boolean)
+        : [process.env.GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-3.7-flash'].filter(Boolean);
     let ultimoError;
-    for (let i = 0; i <= reintentos; i++) {
-        try {
-            const model = genAI.getGenerativeModel({ model: modelo });
-            const result = await model.generateContent(prompt);
-            return result.response.text();
-        } catch (err) {
-            ultimoError = err;
-            await wait(800 * (i + 1));
+    for (const modelo of modelos) {
+        for (let i = 0; i <= reintentos; i++) {
+            try {
+                const model = genAI.getGenerativeModel({
+                    model: modelo,
+                    systemInstruction: INSTRUCCION_GEMINI
+                });
+                const result = await model.generateContent(prompt);
+                const text = result.response.text();
+                if (text && text.trim()) return text;
+            } catch (err) {
+                ultimoError = err;
+                await wait(700 * (i + 1));
+            }
         }
     }
-    throw ultimoError;
+    throw ultimoError || new Error('Gemini no respondio');
 }
 
 async function handleAyuda(sock, from) {
     const texto = [
         '*Comandos*',
         '/ayuda - esta lista',
-        '/google [texto] - buscar en Google',
         '/gemini [texto] - preguntar a Gemini',
-        '/geminiP [texto] - Gemini (mismo modelo, comando extra)',
+        '/geminiP [texto] - Gemini Pro',
         '/letras [cancion] - buscar letra',
         '/pin [texto] - buscar imagen',
         '/reddit [texto] - buscar en Reddit',
@@ -209,31 +241,14 @@ async function handleBaneados(sock, from) {
     if (!bannedCache.length) return sock.sendMessage(from, { text: 'No hay nadie baneado.' });
     await sock.sendMessage(from, { text: 'Baneados:\n' + bannedCache.map((n) => `- ${n}`).join('\n') });
 }
-async function handleGoogle(sock, from, args) {
-    if (!args) return sock.sendMessage(from, { text: 'Formato: /google [tu consulta]' });
-    const key = process.env.GOOGLE_SEARCH_KEY;
-    const cx = process.env.GOOGLE_CX;
-    if (!key || !cx) return sock.sendMessage(from, { text: 'Faltan en Render GOOGLE_SEARCH_KEY y GOOGLE_CX.' });
-    try {
-        const url = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(args)}&key=${key}&cx=${cx}`;
-        const res = await fetch(url);
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error((json?.error?.message || `HTTP ${res.status}`) + '. Activa Custom Search JSON API.');
-        if (!json.items || !json.items.length) return sock.sendMessage(from, { text: 'No encontre resultados en Google.' });
-        const top = json.items[0];
-        await sock.sendMessage(from, { text: `*${top.title}*\n${top.snippet}\n${top.link}` });
-    } catch (err) {
-        await sock.sendMessage(from, { text: `Error en Google: ${err.message}` });
-    }
-}
 async function handleGemini(sock, from, args, usarPro = false) {
-    if (!args) return sock.sendMessage(from, { text: `Formato: ${usarPro ? '/geminiP' : '/gemini'} [tu consulta]` });
+    if (!args) return sock.sendMessage(from, { text: usarPro ? 'Formato: /geminiP [tu consulta]' : 'Formato: /gemini [tu consulta]' });
     try {
-        const text = await askGeminiWithRetry(args, usarPro);
-        if (!text) return sock.sendMessage(from, { text: 'Gemini no devolvio texto.' });
-        await sock.sendMessage(from, { text: `Gemini:\n\n${text.trim()}` });
+        const text = limpioWhatsApp(await askGeminiWithRetry(args, usarPro));
+        if (!text) return sock.sendMessage(from, { text: 'No pude armar una respuesta.' });
+        await sock.sendMessage(from, { text });
     } catch (err) {
-        await sock.sendMessage(from, { text: `Error en Gemini: ${err.message}` });
+        await sock.sendMessage(from, { text: usarPro ? `No pude usar Pro. ${err.message}` : `Error: ${err.message}` });
     }
 }
 async function handleLetras(sock, from, args) {
@@ -311,13 +326,12 @@ async function handleTestCadena(sock, from) {
     const tests = [
         { nombre: '/status', run: () => handleStatus(sock, from) },
         { nombre: '/admins', run: () => sock.sendMessage(from, { text: `Modo solo admins ahora: ${soloAdmins ? 'ON' : 'OFF'}` }) },
-        { nombre: '/ban', run: () => sock.sendMessage(from, { text: 'Admin /ban listo. Uso: /ban 549... o responde un mensaje' }) },
         { nombre: '/ruleta', run: () => handleRuleta(sock, from, 'El bot responde?') },
         { nombre: '/letras', run: () => handleLetras(sock, from, 'Kali Uchis Luna') },
         { nombre: '/reddit', run: () => handleReddit(sock, from, 'memes') },
         { nombre: '/pin', run: () => handlePinterest(sock, from, 'gatos') },
-        { nombre: '/google', run: () => handleGoogle(sock, from, 'que dia es hoy') },
-        { nombre: '/gemini', run: () => handleGemini(sock, from, 'Hola, como estas?', false) }
+        { nombre: '/gemini', run: () => handleGemini(sock, from, 'Decime hola en una sola linea', false) },
+        { nombre: '/geminiP', run: () => handleGemini(sock, from, 'Decime hola en una sola linea', true) }
     ];
     for (const test of tests) {
         try { await test.run(); } catch (err) {
@@ -463,9 +477,9 @@ async function startBot() {
             const comandosPublicos = {
                 '/ayuda': () => handleAyuda(sock, from),
                 '/help': () => handleAyuda(sock, from),
-                '/google': () => handleGoogle(sock, from, args),
                 '/gemini': () => handleGemini(sock, from, args, false),
                 '/geminip': () => handleGemini(sock, from, args, true),
+                '/gemini-p': () => handleGemini(sock, from, args, true),
                 '/letras': () => handleLetras(sock, from, args),
                 '/reddit': () => handleReddit(sock, from, args),
                 '/pin': () => handlePinterest(sock, from, args),
